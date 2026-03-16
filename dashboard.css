@@ -695,6 +695,22 @@ td small {
   color: var(--muted);
 }
 
+.signed-value.positive {
+  color: var(--buy);
+}
+
+.signed-value.negative {
+  color: #2f6fa8;
+}
+
+.signed-value.neutral {
+  color: inherit;
+}
+
+.signed-value.subtle {
+  font-weight: 700;
+}
+
 .mono {
   font-family: var(--mono);
 }
@@ -883,6 +899,41 @@ td small {
   border: 1px solid var(--line);
   border-radius: 20px;
   background: var(--panel-strong);
+}
+
+.market-sector-card {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--panel-soft);
+}
+
+.market-sector-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.market-sector-stats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.market-flow-table-wrap {
+  margin-top: 0;
+}
+
+.market-flow-table td:nth-child(2),
+.market-flow-table td:nth-child(3),
+.market-flow-table td:nth-child(4),
+.market-flow-table td:nth-child(5),
+.market-flow-table td:nth-child(6) {
+  white-space: nowrap;
 }
 
 .timeline-time {
@@ -1170,6 +1221,21 @@ td small {
 
   .mobile-status-item {
     min-height: 84px;
+  }
+
+  .market-sector-card {
+    padding: 14px;
+    margin-top: 14px;
+  }
+
+  .market-sector-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .market-sector-stats {
+    justify-content: flex-start;
   }
 
   .signal-list {

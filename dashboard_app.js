@@ -713,6 +713,18 @@ const formatPrice = (value) => `${numberOrZero(value).toLocaleString("ko-KR")}�
 const formatPct = (value, digits = 2) => `${numberOrZero(value).toFixed(digits)}%`;
 const formatEok = (value) => `${numberOrZero(value).toFixed(1)}억`;
 const formatRatioPct = (value) => `${(numberOrZero(value) * 100).toFixed(3)}%`;
+const signedTone = (value) => (numberOrZero(value) > 0 ? "positive" : numberOrZero(value) < 0 ? "negative" : "neutral");
+const signedClassName = (value, subtle = false) => {
+  const tone = signedTone(value);
+  return `signed-value ${tone}${subtle ? " subtle" : ""}`;
+};
+const signedText = (value, text, subtle = false) => `<span class="${signedClassName(value, subtle)}">${escapeHtml(text)}</span>`;
+const signedPctText = (value, digits = 2, subtle = false) => signedText(value, formatPct(value, digits), subtle);
+const signedRatioPctText = (value, subtle = false) => signedText(value, formatRatioPct(value), subtle);
+const signedPriceText = (price, directionValue = 0, subtle = true) => signedText(directionValue, formatPrice(price), subtle);
+const signedNumberText = (value, digits = 1, suffix = "", subtle = false) =>
+  signedText(value, `${numberOrZero(value).toFixed(digits)}${suffix}`, subtle);
+const htmlValue = (markup) => ({ __html: String(markup || "") });
 
 function formatHolding(seconds) {
   const total = Math.max(0, Math.round(numberOrZero(seconds)));
@@ -2011,6 +2023,7 @@ function renderSignalList(container, rows, side) {
     const detail = detailFromRow(row);
     const key = row.signal_id || row.position_id || row.code;
     const summary = signalSummaryText(row, detail, side);
+    const changeValue = detail.change_rate || row.change_rate || 0;
     return `
       <article class="signal-card ${side === "BUY" ? "buy" : "sell"}">
         <div class="signal-head">
@@ -3082,6 +3095,136 @@ function renderOverview() {
   `).join("");
 }
 
+function buildMarketFlowGroups(rows) {
+  const grouped = rows.reduce((acc, row) => {
+    const sector = String(row.sector || "섹터 확인 중").trim() || "섹터 확인 중";
+    if (!acc[sector]) acc[sector] = [];
+    acc[sector].push(row);
+    return acc;
+  }, {});
+
+  return Object.entries(grouped)
+    .map(([sector, sectorRows]) => {
+      const sortedRows = [...sectorRows].sort((a, b) =>
+        numberOrZero(b.change_rate) - numberOrZero(a.change_rate)
+        || numberOrZero(b.trade_value_eok) - numberOrZero(a.trade_value_eok)
+        || numberOrZero(b.score) - numberOrZero(a.score)
+      );
+      const avgChange = sortedRows.length
+        ? sortedRows.reduce((sum, row) => sum + numberOrZero(row.change_rate), 0) / sortedRows.length
+        : 0;
+      const totalTradeValue = sortedRows.reduce((sum, row) => sum + numberOrZero(row.trade_value_eok), 0);
+      const representativeScore = sortedRows.length
+        ? sortedRows.reduce((sum, row) => sum + numberOrZero(row.score), 0) / sortedRows.length
+        : 0;
+      return { sector, rows: sortedRows, avgChange, totalTradeValue, representativeScore };
+    })
+    .sort((a, b) => {
+      const aUnknown = a.sector === "섹터 확인 중" ? 1 : 0;
+      const bUnknown = b.sector === "섹터 확인 중" ? 1 : 0;
+      return aUnknown - bUnknown
+        || numberOrZero(b.avgChange) - numberOrZero(a.avgChange)
+        || numberOrZero(b.totalTradeValue) - numberOrZero(a.totalTradeValue)
+        || numberOrZero(b.representativeScore) - numberOrZero(a.representativeScore);
+    });
+}
+
+function renderOverviewV2() {
+  const rows = [...state.overviewRows].sort((a, b) =>
+    numberOrZero(b.change_rate) - numberOrZero(a.change_rate)
+    || numberOrZero(b.trade_value_eok) - numberOrZero(a.trade_value_eok)
+    || numberOrZero(b.score) - numberOrZero(a.score)
+  );
+  upsertDetailIndex(rows);
+  if (!rows.length) {
+    el.overviewBoard.innerHTML = '<div class="empty">상승 종목 섹터 보드에 아직 표시할 데이터가 없습니다.</div>';
+    return;
+  }
+
+  const groups = buildMarketFlowGroups(rows);
+  el.overviewBoard.innerHTML = groups.map((group) => `
+    <section class="market-sector-card">
+      <div class="market-sector-head">
+        <div>
+          <h3>${escapeHtml(group.sector)}</h3>
+          <p class="small">현재 실제로 상승 중인 종목을 섹터별로 묶어 시장 흐름만 빠르게 훑어보는 영역입니다.</p>
+        </div>
+        <div class="market-sector-stats">
+          <span class="chip">${escapeHtml(`${group.rows.length}종목`)}</span>
+          <span class="chip" data-signed-value="${escapeHtml(String(group.avgChange))}">평균 ${escapeHtml(formatPct(group.avgChange))}</span>
+          <span class="chip">거래대금 ${escapeHtml(formatEok(group.totalTradeValue))}</span>
+        </div>
+      </div>
+      <div class="table-wrap market-flow-table-wrap">
+        <table class="responsive-table responsive-table-market market-flow-table">
+          <thead>
+            <tr>
+              <th>종목</th>
+              <th>상승률</th>
+              <th>현재가</th>
+              <th>거래대금</th>
+              <th>최근 변화</th>
+              <th>평가점수</th>
+              <th>상태</th>
+              <th>자세히</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${group.rows.map((row) => {
+              const detail = detailFromRow(row);
+              const detailKey = row.signal_id || row.position_id || row.code;
+              const summary = row.note || detail.signal_summary || "시장 흐름 관찰용 행입니다.";
+              return `
+                <tr>
+                  <td data-label="종목">
+                    <strong>${escapeHtml(row.name)}</strong>
+                    <small>${escapeHtml(row.code)} / ${escapeHtml(row.market || "-")}</small>
+                  </td>
+                  <td data-label="상승률" data-signed-value="${escapeHtml(String(numberOrZero(row.change_rate)))}">${escapeHtml(formatPct(row.change_rate || 0))}</td>
+                  <td data-label="현재가" data-price-direction="${escapeHtml(String(numberOrZero(row.change_rate)))}">${escapeHtml(formatPrice(row.price || 0))}</td>
+                  <td data-label="거래대금">${escapeHtml(formatEok(row.trade_value_eok || 0))}</td>
+                  <td data-label="최근 변화" data-signed-value="${escapeHtml(String(numberOrZero(detail.recent_change_pct)))}">${escapeHtml(formatPct(detail.recent_change_pct || 0))}</td>
+                  <td data-label="평가점수">${numberOrZero(row.score || 0).toFixed(1)}</td>
+                  <td data-label="상태"><small>${escapeHtml(summary)}</small></td>
+                  <td data-label="자세히"><button class="ghost" data-detail-id="${escapeHtml(detailKey)}" type="button">자세히</button></td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `).join("");
+}
+
+function decorateSignedMetrics() {
+  document.querySelectorAll("[data-signed-value]").forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    const value = numberOrZero(node.dataset.signedValue);
+    node.classList.remove("positive", "negative", "neutral", "signed-value");
+    node.classList.add("signed-value", signedTone(value));
+  });
+
+  document.querySelectorAll("[data-price-direction]").forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    const value = numberOrZero(node.dataset.priceDirection);
+    node.classList.remove("positive", "negative", "neutral", "signed-value", "subtle");
+    node.classList.add("signed-value", signedTone(value), "subtle");
+  });
+
+  document.querySelectorAll(".signal-tags .tag, .detail-item strong, .responsive-table td, .list-card span").forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    if (node.dataset.signedValue || node.dataset.priceDirection) return;
+    const text = (node.textContent || "").trim();
+    const pctMatch = text.match(/([-+]?\d+(?:\.\d+)?)%/);
+    if (!pctMatch) return;
+    const value = Number.parseFloat(pctMatch[1]);
+    if (!Number.isFinite(value)) return;
+    node.classList.remove("positive", "negative", "neutral", "signed-value");
+    node.classList.add("signed-value", signedTone(value));
+  });
+}
+
 function renderHistoryFilters(rows) {
   const signalValues = Array.from(new Set(rows.map((row) => row.buy_signal_type || row.sell_signal_type || "").filter(Boolean))).sort();
   const presetValues = Array.from(new Set(rows.map((row) => row.preset_label || row.preset_name || "").filter(Boolean))).sort();
@@ -3317,10 +3460,11 @@ function render() {
   el.buySignalCount.textContent = `${liveCollections.buyRows.length}건`;
   el.sellSignalCount.textContent = `${liveCollections.sellRows.length}건`;
   renderMobilePrioritySummary();
-  renderOverview();
+  renderOverviewV2();
   renderEarlyDetection();
   renderHistory();
   decorateResponsiveTables();
+  decorateSignedMetrics();
 }
 
 const closeDetail = () => el.detailModal.classList.remove("open");
