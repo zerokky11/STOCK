@@ -3155,43 +3155,91 @@ function renderOverviewV2() {
           <span class="chip">거래대금 ${escapeHtml(formatEok(group.totalTradeValue))}</span>
         </div>
       </div>
-      <div class="table-wrap market-flow-table-wrap">
-        <table class="responsive-table responsive-table-market market-flow-table">
-          <thead>
-            <tr>
-              <th>종목</th>
-              <th>상승률</th>
-              <th>현재가</th>
-              <th>거래대금</th>
-              <th>최근 변화</th>
-              <th>평가점수</th>
-              <th>상태</th>
-              <th>자세히</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${group.rows.map((row) => {
-              const detail = detailFromRow(row);
-              const detailKey = row.signal_id || row.position_id || row.code;
-              const summary = row.note || detail.signal_summary || "시장 흐름 관찰용 행입니다.";
-              return `
-                <tr>
-                  <td data-label="종목">
-                    <strong>${escapeHtml(row.name)}</strong>
-                    <small>${escapeHtml(row.code)} / ${escapeHtml(row.market || "-")}</small>
-                  </td>
-                  <td data-label="상승률" data-signed-value="${escapeHtml(String(numberOrZero(row.change_rate)))}">${escapeHtml(formatPct(row.change_rate || 0))}</td>
-                  <td data-label="현재가" data-price-direction="${escapeHtml(String(numberOrZero(row.change_rate)))}">${escapeHtml(formatPrice(row.price || 0))}</td>
-                  <td data-label="거래대금">${escapeHtml(formatEok(row.trade_value_eok || 0))}</td>
-                  <td data-label="최근 변화" data-signed-value="${escapeHtml(String(numberOrZero(detail.recent_change_pct)))}">${escapeHtml(formatPct(detail.recent_change_pct || 0))}</td>
-                  <td data-label="평가점수">${numberOrZero(row.score || 0).toFixed(1)}</td>
-                  <td data-label="상태"><small>${escapeHtml(summary)}</small></td>
-                  <td data-label="자세히"><button class="ghost" data-detail-id="${escapeHtml(detailKey)}" type="button">자세히</button></td>
-                </tr>
-              `;
-            }).join("")}
-          </tbody>
-        </table>
+      <div class="market-flow-desktop">
+        <div class="table-wrap market-flow-table-wrap">
+          <table class="market-flow-grid-table">
+            <thead>
+              <tr>
+                <th>종목명</th>
+                <th>종목코드</th>
+                <th>상승률</th>
+                <th>현재가</th>
+                <th>거래대금</th>
+                <th>최근 변화</th>
+                <th>평가점수</th>
+                <th>상태</th>
+                <th>자세히</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${group.rows.map((row) => {
+                const detail = detailFromRow(row);
+                const detailKey = row.signal_id || row.position_id || row.code;
+                const summary = row.note || detail.signal_summary || "시장 흐름 관찰용 행입니다.";
+                return `
+                  <tr>
+                    <td class="market-flow-name-cell">
+                      <strong>${escapeHtml(row.name)}</strong>
+                      <small>${escapeHtml(row.market || "-")}</small>
+                    </td>
+                    <td class="market-flow-code-cell">${escapeHtml(row.code)}</td>
+                    <td class="market-flow-number-cell" data-signed-value="${escapeHtml(String(numberOrZero(row.change_rate)))}">${escapeHtml(formatPct(row.change_rate || 0))}</td>
+                    <td class="market-flow-number-cell" data-price-direction="${escapeHtml(String(numberOrZero(row.change_rate)))}">${escapeHtml(formatPrice(row.price || 0))}</td>
+                    <td class="market-flow-number-cell">${escapeHtml(formatEok(row.trade_value_eok || 0))}</td>
+                    <td class="market-flow-number-cell" data-signed-value="${escapeHtml(String(numberOrZero(detail.recent_change_pct)))}">${escapeHtml(formatPct(detail.recent_change_pct || 0))}</td>
+                    <td class="market-flow-number-cell">${numberOrZero(row.score || 0).toFixed(1)}</td>
+                    <td class="market-flow-status-cell"><small>${escapeHtml(summary)}</small></td>
+                    <td class="market-flow-action-cell"><button class="ghost" data-detail-id="${escapeHtml(detailKey)}" type="button">자세히</button></td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="market-flow-mobile-list">
+        ${group.rows.map((row) => {
+          const detail = detailFromRow(row);
+          const detailKey = row.signal_id || row.position_id || row.code;
+          const summary = row.note || detail.signal_summary || "시장 흐름 관찰용 행입니다.";
+          return `
+            <article class="market-flow-mobile-row">
+              <div class="market-flow-mobile-top">
+                <div class="market-flow-mobile-title">
+                  <strong>${escapeHtml(row.name)}</strong>
+                  <small>${escapeHtml(row.code)} / ${escapeHtml(row.market || "-")}</small>
+                </div>
+                <button class="ghost market-flow-mobile-detail" data-detail-id="${escapeHtml(detailKey)}" type="button">자세히</button>
+              </div>
+              <div class="market-flow-mobile-metrics">
+                <div class="market-flow-mobile-metric">
+                  <span>상승률</span>
+                  <strong data-signed-value="${escapeHtml(String(numberOrZero(row.change_rate)))}">${escapeHtml(formatPct(row.change_rate || 0))}</strong>
+                </div>
+                <div class="market-flow-mobile-metric">
+                  <span>현재가</span>
+                  <strong data-price-direction="${escapeHtml(String(numberOrZero(row.change_rate)))}">${escapeHtml(formatPrice(row.price || 0))}</strong>
+                </div>
+                <div class="market-flow-mobile-metric">
+                  <span>거래대금</span>
+                  <strong>${escapeHtml(formatEok(row.trade_value_eok || 0))}</strong>
+                </div>
+                <div class="market-flow-mobile-metric">
+                  <span>최근 변화</span>
+                  <strong data-signed-value="${escapeHtml(String(numberOrZero(detail.recent_change_pct)))}">${escapeHtml(formatPct(detail.recent_change_pct || 0))}</strong>
+                </div>
+                <div class="market-flow-mobile-metric">
+                  <span>평가점수</span>
+                  <strong>${numberOrZero(row.score || 0).toFixed(1)}</strong>
+                </div>
+                <div class="market-flow-mobile-metric">
+                  <span>상태</span>
+                  <strong>${escapeHtml(summary)}</strong>
+                </div>
+              </div>
+            </article>
+          `;
+        }).join("")}
       </div>
     </section>
   `).join("");
