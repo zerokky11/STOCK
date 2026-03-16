@@ -565,6 +565,7 @@ const el = {
   heartbeatLabel: document.getElementById("heartbeatLabel"),
   lastSignalLabel: document.getElementById("lastSignalLabel"),
   statusChips: document.getElementById("statusChips"),
+  mobileStatusFlags: document.getElementById("mobileStatusFlags"),
   statusNotice: document.getElementById("statusNotice"),
   statusDetailGrid: document.getElementById("statusDetailGrid"),
   setupNote: document.getElementById("setupNote"),
@@ -619,6 +620,7 @@ const el = {
   mobileEarlySummaryChips: document.getElementById("mobileEarlySummaryChips"),
   mobileEarlyDetectionList: document.getElementById("mobileEarlyDetectionList"),
   mobileStatusDetailGrid: document.getElementById("mobileStatusDetailGrid"),
+  mobileStatusDetailBadge: document.getElementById("mobileStatusDetailBadge"),
   mobileOperationsGrid: document.getElementById("mobileOperationsGrid"),
   mobileRuntimeNotes: document.getElementById("mobileRuntimeNotes"),
   mobileDiagnosticList: document.getElementById("mobileDiagnosticList"),
@@ -991,11 +993,13 @@ async function fetchOverviewRows() {
   const activeTable = (state.status?.dashboard_source_mode || "last_market") === "live"
     ? tableName("risingSectorRows")
     : tableName("lastMarket");
-  const { data, error } = await state.client
+  let query = state.client
     .from(activeTable)
     .select("*")
-    .order("score", { ascending: false })
+    .order("change_rate", { ascending: false })
+    .order("trade_value_eok", { ascending: false })
     .limit(120);
+  const { data, error } = await query;
   if (error) {
     if (error.code === "PGRST205" && activeTable === tableName("lastMarket")) {
       state.overviewRows = [];
@@ -1606,6 +1610,14 @@ function renderStatus() {
   el.heartbeatLabel.textContent = heartbeatInfo.label;
   el.lastSignalLabel.textContent = formatDateTime(status.last_signal_at);
   el.statusNotice.textContent = status.notice_text || sourceInfo.note;
+  const hasQuietMobileNotice = !(
+    diagnosticsInfo.tone === "error"
+    || diagnosticsInfo.tone === "warn"
+    || status.ready_check_status === "fail"
+    || status.ready_check_status === "warn"
+    || Boolean(status.last_error_code || status.last_error_message)
+  );
+  el.statusNotice.classList.toggle("is-quiet", hasQuietMobileNotice);
 
   const chips = [
     { text: `전체 ${status.total_universe_count || status.watchlist_count || 0}종목`, tone: "info" },
@@ -1972,8 +1984,47 @@ function renderMobilePrioritySummary() {
   if (!el.mobileStatusSummary) return;
   const status = state.status || {};
   const sourceInfo = sourceModeStatus(status);
-  const heartbeatInfo = heartbeatStatus(status);
-  const liveFreshness = numberOrZero(status.live_data_freshness_seconds);
+  const settingsInfo = settingsReflectionStatus(status);
+  const diagnosticsInfo = diagnosticsStatus(status);
+  const activePresetName = status.active_preset_name || status.selected_preset_name;
+  const activePresetLabel = status.active_preset_label || status.selected_preset_label || "?뺤씤 以?";
+  const compactCards = [
+    {
+      label: "?쒖옣 ?곹깭",
+      value: status.market_phase_label || status.market_status_label || "?뺤씤 以?",
+      note: status.current_market_regime_label || status.current_market_regime || "?μ꽭 ?댁꽍 ?湲?以?",
+    },
+    {
+      label: "?꾩옱 諛섏쁺 紐⑤뱶",
+      value: sourceInfo.label || "?뺤씤 以?",
+      note: sourceInfo.note || "?ㅼ떆媛??곗씠??諛섏쁺 ?곹깭瑜?蹂댁뿬以띾땲??",
+    },
+    {
+      label: "?쒖꽦 preset",
+      value: activePresetLabel,
+      note: isTestPreset(activePresetName)
+        ? "?뚯뒪?몄슜 preset?쇰줈 ?꾨낫? focused ?밴꺽???볤쾶 遊낅땲??"
+        : status.active_preset_reason || "?꾩옱 ?쒓컙? ?μ꽭瑜?諛섏쁺??preset?낅땲??",
+    },
+    {
+      label: "?ㅼ젙 諛섏쁺 ?곹깭",
+      value: settingsInfo.label || "?뺤씤 以?",
+      note: settingsInfo.note || "?꾩옱 ?곸슜 以묒씤 ?ㅼ젙 諛섏쁺 ?곹깭瑜?蹂댁뿬以띾땲??",
+    },
+    {
+      label: "寃쎄퀬 ?좊Ц",
+      value: diagnosticsInfo.label || "?뺤씤 以?",
+      note: diagnosticsInfo.note || "?곸슜?먯꽌 ?뺤씤???⑥쐞 寃쎄퀬 ?곹깭瑜?蹂댁뿬以띾땲??",
+    },
+  ];
+  el.mobileStatusSummary.innerHTML = compactCards.map((item) => `
+    <article class="status-item mobile-status-item">
+      <strong>${escapeHtml(item.label)}</strong>
+      <span>${escapeHtml(item.value || "-")}</span>
+      <p>${escapeHtml(item.note || "")}</p>
+    </article>
+  `).join("");
+  return;
   const cards = [
     {
       label: "시장 상태",
@@ -2907,7 +2958,11 @@ function renderEarlyDetection() {
 }
 
 function renderOverview() {
-  const rows = [...state.overviewRows].sort((a, b) => numberOrZero(b.score) - numberOrZero(a.score));
+  const rows = [...state.overviewRows].sort((a, b) =>
+    numberOrZero(b.change_rate) - numberOrZero(a.change_rate)
+    || numberOrZero(b.trade_value_eok) - numberOrZero(a.trade_value_eok)
+    || numberOrZero(b.score) - numberOrZero(a.score)
+  );
   upsertDetailIndex(rows);
   if (!rows.length) {
     el.overviewBoard.innerHTML = '<div class="empty">상승 종목 섹터 보드에 아직 표시할 데이터가 없습니다.</div>';
@@ -3487,6 +3542,49 @@ function renderStatus() {
     { text: diagnosticsInfo.label, tone: diagnosticsInfo.tone },
   ];
   el.statusChips.innerHTML = chips.map((item) => `<span class="chip ${escapeHtml(item.tone)}">${escapeHtml(item.text)}</span>`).join("");
+  if (el.mobileStatusFlags) {
+    const mobileFlags = [];
+    if (diagnosticsInfo.tone === "error" || diagnosticsInfo.tone === "warn") {
+      mobileFlags.push({ text: diagnosticsInfo.label, tone: diagnosticsInfo.tone });
+    }
+    if (status.ready_check_status === "fail" || status.ready_check_status === "warn") {
+      mobileFlags.push({
+        text: `ready ${status.ready_check_status}`,
+        tone: status.ready_check_status === "fail" ? "error" : "warn",
+      });
+    }
+    if (status.last_error_code || status.last_error_message) {
+      mobileFlags.push({ text: "?ㅻ쪟 ?덉쓬", tone: "error" });
+    }
+    if (status.tape_recording_enabled === false) {
+      mobileFlags.push({ text: "tape 湲곕줉 ?앹꽦", tone: "warn" });
+    }
+    el.mobileStatusFlags.innerHTML = mobileFlags
+      .slice(0, 3)
+      .map((item) => `<span class="chip ${escapeHtml(item.tone)}">${escapeHtml(item.text)}</span>`)
+      .join("");
+    el.mobileStatusFlags.hidden = mobileFlags.length === 0;
+  }
+  if (el.mobileStatusDetailBadge) {
+    const hasStatusIssue = diagnosticsInfo.tone === "error"
+      || diagnosticsInfo.tone === "warn"
+      || status.ready_check_status === "warn"
+      || status.ready_check_status === "fail"
+      || Boolean(status.last_error_code || status.last_error_message);
+    const badgeTone = diagnosticsInfo.tone === "error"
+      ? "error"
+      : diagnosticsInfo.tone === "warn" || status.ready_check_status === "warn"
+        ? "warn"
+        : "info";
+    const badgeText = diagnosticsInfo.tone === "error"
+      ? "?ㅻ쪟"
+      : diagnosticsInfo.tone === "warn" || status.ready_check_status === "warn"
+        ? "寃쎄퀬"
+        : "?뺤긽";
+    el.mobileStatusDetailBadge.className = `chip ${badgeTone}`;
+    el.mobileStatusDetailBadge.textContent = badgeText;
+    el.mobileStatusDetailBadge.hidden = !hasStatusIssue;
+  }
 
   const detailCards = [
     {

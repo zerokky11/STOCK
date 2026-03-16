@@ -990,6 +990,26 @@ td small {
   margin-top: 14px;
 }
 
+.hero-more {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.hero-more > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.hero-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.hero-more p {
+  margin-top: 8px;
+}
+
 @media (max-width: 1320px) {
   .toolbar {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1056,6 +1076,7 @@ td small {
   .sticky-shell {
     top: 0;
     gap: 10px;
+    margin-top: 10px;
   }
 
   .hero,
@@ -1067,7 +1088,7 @@ td small {
   }
 
   .hero {
-    padding: 18px 16px;
+    padding: 14px 14px 12px;
   }
 
   .section {
@@ -1082,6 +1103,7 @@ td small {
 
   .button-row {
     width: 100%;
+    gap: 8px;
   }
 
   .button-row button,
@@ -1109,8 +1131,8 @@ td small {
 
   .tab-button {
     flex: 0 0 auto;
-    min-width: 132px;
-    padding: 13px 16px;
+    min-width: 124px;
+    padding: 12px 14px;
     font-size: 14px;
   }
 
@@ -1120,8 +1142,8 @@ td small {
   }
 
   .toolbar-card {
-    min-height: 78px;
-    padding: 12px 14px;
+    min-height: 68px;
+    padding: 10px 12px;
   }
 
   .grid-two,
@@ -1138,7 +1160,7 @@ td small {
   }
 
   .mobile-priority-panel {
-    margin-bottom: 4px;
+    display: none;
   }
 
   .mobile-status-grid {
@@ -1172,8 +1194,17 @@ td small {
     font-size: 14px;
   }
 
+  .mobile-status-flags {
+    margin-top: 8px;
+    gap: 6px;
+  }
+
+  .mobile-status-flags[hidden] {
+    display: none;
+  }
+
   .mobile-operations-toggle {
-    margin-top: 14px;
+    margin-top: 10px;
     border: 1px solid var(--line);
     border-radius: 18px;
     background: rgba(255, 250, 244, 0.94);
@@ -1183,12 +1214,21 @@ td small {
   .mobile-operations-toggle > summary {
     cursor: pointer;
     list-style: none;
-    padding: 14px 16px;
+    padding: 13px 14px;
     font-weight: 760;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
   }
 
   .mobile-operations-toggle > summary::-webkit-details-marker {
     display: none;
+  }
+
+  .mobile-operations-toggle > summary .chip {
+    flex: 0 0 auto;
+    margin-left: auto;
   }
 
   .mobile-operations-toggle .status-grid,
@@ -1199,8 +1239,89 @@ td small {
     padding: 0 14px 14px;
   }
 
+  .copy.desktop-only,
+  #statusChips,
+  #setupNote,
+  #historyButton,
+  .tab-button[data-tab-button="settings"] {
+    display: none;
+  }
+
+  .mobile-hero-copy {
+    margin-top: 6px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .hero .eyebrow {
+    padding: 5px 9px;
+    font-size: 11px;
+  }
+
+  .hero h1 {
+    font-size: 22px;
+    line-height: 1.22;
+  }
+
+  .hero .button-row {
+    margin-top: 2px;
+    justify-content: flex-start;
+  }
+
+  .hero .button-row button {
+    flex: 0 0 auto;
+    padding: 10px 13px;
+  }
+
+  .status-strip {
+    padding: 10px 10px 10px;
+  }
+
+  .toolbar-card:nth-child(5),
+  .toolbar-card:nth-child(6) {
+    display: none;
+  }
+
+  .toolbar-card span,
+  .status-item span,
+  .meta-card span,
+  .list-card span {
+    font-size: 16px;
+  }
+
+  .status-banner {
+    margin-top: 8px;
+    padding: 9px 10px;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .status-banner.is-quiet {
+    display: none;
+  }
+
   .mobile-diagnostic-grid {
     grid-template-columns: 1fr;
+  }
+
+  .hero-more {
+    margin-top: 6px;
+  }
+
+  .hero-more > summary {
+    font-size: 12px;
+  }
+
+  .tab-stack {
+    margin-top: 12px;
+  }
+
+  .tab-panel[data-tab-panel="signals"] > .section:last-child > .section-head {
+    display: none;
+  }
+
+  .tab-panel[data-tab-panel="signals"] .section-head .section-copy {
+    display: none;
   }
 
   .tab-panel[data-tab-panel="signals"] > .section:last-child > #statusDetailGrid,

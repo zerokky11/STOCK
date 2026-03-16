@@ -13,9 +13,18 @@
         <div>
           <p class="eyebrow">공개 공유형 신호 보드</p>
           <h1>가족용 실시간 매수·매도 신호 대시보드</h1>
-          <p class="copy">
+          <p class="copy desktop-only">
             공개 URL 하나로 실시간 매수 신호, 실시간 매도 신호, 시장 흐름 보드, 설정과 추천값, 거래 내역과 성과를 함께 확인할 수 있도록 정리한 공유용 화면입니다.
           </p>
+          <p class="copy mobile-only mobile-hero-copy">
+            실시간 신호와 초기 포착 흐름을 빠르게 확인하는 공개 공유형 보드입니다.
+          </p>
+          <details class="mobile-only hero-more">
+            <summary>설명 더보기</summary>
+            <p class="small">
+              매수·매도 신호, 초기 포착, 시장 흐름, 설정과 복기 결과를 한 화면에서 확인할 수 있게 정리한 공유용 대시보드입니다.
+            </p>
+          </details>
         </div>
         <div class="button-row">
           <button class="secondary" id="settingsButton">설정 / 추천값 보기</button>
@@ -53,6 +62,7 @@
           </article>
         </div>
         <div class="chips" id="statusChips"></div>
+        <div class="chips mobile-only mobile-status-flags" id="mobileStatusFlags"></div>
         <div class="status-banner" id="statusNotice">Supabase 연결 상태를 확인하는 중입니다.</div>
         <p class="setup-note" id="setupNote"></p>
       </section>
@@ -135,7 +145,10 @@
               </div>
             </div>
             <details class="mobile-only mobile-operations-toggle">
-              <summary>운영 상태 자세히 보기</summary>
+              <summary>
+                <span>운영 상태 자세히 보기</span>
+                <span class="chip info" id="mobileStatusDetailBadge" hidden>정상</span>
+              </summary>
               <div class="status-grid" id="mobileStatusDetailGrid"></div>
               <div class="status-grid compact" id="mobileOperationsGrid"></div>
               <div class="note-list" id="mobileRuntimeNotes"></div>
