@@ -5201,8 +5201,8 @@ function summarizeErrorMessage(message, code = "") {
 
 function diagnosticSummary(row) {
   const details = parseMaybeJson(row?.details, {});
-  const code = row?.code || details?.code || row?.status_code || "";
-  const message = row?.message || details?.message || details?.error || row?.summary || "";
+  const code = row?.code || details?.code || details?.error_type || row?.status_code || "";
+  const message = row?.message || details?.short_message || details?.message || details?.error || row?.summary || "";
   return summarizeErrorMessage(message, code);
 }
 
@@ -5315,6 +5315,18 @@ function settingsReflectionStatus(status) {
 }
 
 function diagnosticsStatus(status) {
+  if (status.app_status_sync_state && status.app_status_sync_state !== "ok") {
+    return {
+      label: "운영 상태 동기화 지연",
+      tone: "warn",
+      note: status.app_status_sync_short_message
+        ? `최근 상태 반영이 지연될 수 있습니다. ${status.app_status_sync_short_message}`
+        : "최근 상태 반영이 지연될 수 있습니다.",
+      detail: status.app_status_last_failure_at
+        ? `마지막 실패 ${formatDateTime(status.app_status_last_failure_at)} / backoff ${numberOrZero(status.app_status_sync_backoff_seconds).toFixed(1)}초`
+        : "",
+    };
+  }
   if (!status.settings_table_available) {
     return { label: "signal_settings 미구성", tone: "warn", note: "signal_settings 테이블이 아직 없어 기본 설정으로 동작 중입니다." };
   }
@@ -5663,6 +5675,18 @@ function renderStatus() {
   const operationsMarkup = [
     { label: "운영 모드", value: sourceInfo.label, note: sourceInfo.note },
     { label: "producer heartbeat", value: heartbeatInfo.label, note: heartbeatInfo.note },
+    {
+      label: "상태 동기화",
+      value: status.app_status_sync_state || "ok",
+      note: status.app_status_sync_state && status.app_status_sync_state !== "ok"
+        ? `${status.app_status_sync_short_message || "app_status 재시도 중"} / 마지막 성공 ${formatDateTime(status.app_status_last_success_at)}`
+        : `마지막 성공 ${formatDateTime(status.app_status_last_success_at)}`,
+    },
+    {
+      label: "broad scan quote",
+      value: `${numberOrZero(status.broad_scan_quote_failure_ratio).toFixed(1)}% 실패`,
+      note: `성공 ${numberOrZero(status.broad_scan_quote_success_count).toFixed(0)} / 실패 ${numberOrZero(status.broad_scan_quote_failure_count).toFixed(0)}`,
+    },
     { label: "상위 섹터 군집", value: status.top_sector_cluster || "확인 중", note: "오늘 장세를 끄는 섹터가 있다면 이 영역에 먼저 나타납니다." },
     { label: "휩쏘 위험", value: numberOrZero(status.current_whipsaw_risk).toFixed(1), note: "값이 높을수록 흔들림이 커 false positive가 늘기 쉬운 환경입니다." },
     { label: "추세 지속성", value: numberOrZero(status.current_trend_persistence).toFixed(1), note: "값이 높을수록 장중 흐름이 오후까지 이어지는 편입니다." },
