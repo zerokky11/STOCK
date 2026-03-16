@@ -990,7 +990,7 @@ async function fetchSellSignals() {
 }
 
 async function fetchOverviewRows() {
-  const activeTable = (state.status?.dashboard_source_mode || "last_market") === "live"
+  const activeTable = state.status?.market_open
     ? tableName("risingSectorRows")
     : tableName("lastMarket");
   let query = state.client
@@ -1421,8 +1421,36 @@ function setSettingsFlash(type, text) {
   el.settingsFlash.textContent = text;
 }
 
+const REALTIME_ROW_STALE_SECONDS = 900;
+
+function rowActivityTime(row) {
+  const detail = row?.detail || {};
+  return row?.updated_at || row?.event_time || row?.created_at || row?.trade_time || detail.received_at || detail.trade_time || "";
+}
+
+function isFreshRealtimeRow(row) {
+  const timestamp = rowActivityTime(row);
+  if (!timestamp) return true;
+  return secondsSince(timestamp) <= REALTIME_ROW_STALE_SECONDS;
+}
+
+function currentLiveCollections() {
+  const buyRows = (state.buySignals || []).filter(isFreshRealtimeRow);
+  const sellRows = (state.sellSignals || []).filter(isFreshRealtimeRow);
+  const earlyRows = (state.earlyDetectionRows || []).filter(isFreshRealtimeRow);
+  const focusedRows = (state.focusedRows || []).filter(isFreshRealtimeRow);
+  const liveRowCount = buyRows.length + sellRows.length + earlyRows.length + focusedRows.length;
+  const baseMode = state.status?.dashboard_source_mode || "last_market";
+  const effectiveMode = baseMode === "live"
+    ? "live"
+    : liveRowCount > 0
+      ? "partial_live"
+      : baseMode;
+  return { buyRows, sellRows, earlyRows, focusedRows, liveRowCount, effectiveMode };
+}
+
 function sourceModeStatus(status) {
-  const mode = status.dashboard_source_mode || "last_market";
+  const mode = currentLiveCollections().effectiveMode || status.dashboard_source_mode || "last_market";
   const liveState = status.live_state || "stopped";
   if (mode === "live" && liveState === "ok") return { label: "live 정상", tone: "ok", note: "실시간 데이터가 정상적으로 들어오고 있습니다." };
   if (mode === "live" && liveState === "delayed") return { label: "live 지연", tone: "pending", note: "최근 틱 수신이 지연되고 있어 마지막 데이터가 유지되고 있습니다." };
@@ -1430,6 +1458,33 @@ function sourceModeStatus(status) {
   if (mode === "live") return { label: "live 멈춤", tone: "error", note: "러너가 live 상태를 유지하지 못해 마지막 데이터를 잡고 있습니다." };
   if (mode === "fallback") return { label: "snapshot fallback", tone: "warn", note: status.fallback_reason || "현재는 마지막 시장 기준 데이터를 보여주고 있습니다." };
   if (mode === "last_market") return { label: "last_market", tone: "info", note: "현재는 마지막 시장 기준 데이터를 보여주고 있습니다." };
+  return { label: "확인 중", tone: "info", note: "실시간 상태를 확인하는 중입니다." };
+}
+
+function effectiveSourceModeStatus(status) {
+  const mode = currentLiveCollections().effectiveMode || status.dashboard_source_mode || "last_market";
+  const liveState = status.live_state || "stopped";
+  if (mode === "live" && liveState === "ok") {
+    return { label: "live 정상", tone: "ok", note: "실시간 데이터가 정상적으로 들어오고 있습니다." };
+  }
+  if (mode === "live" && liveState === "delayed") {
+    return { label: "live 지연", tone: "pending", note: "최근 틱 수신이 지연되고 있어 마지막 데이터가 유지되고 있습니다." };
+  }
+  if (mode === "live" && liveState === "stale") {
+    return { label: "live stale", tone: "warn", note: "실시간 데이터 갱신이 잠시 멈춰 마지막 값을 유지하고 있습니다." };
+  }
+  if (mode === "live") {
+    return { label: "live 멈춤", tone: "error", note: "실시간 상태를 확인하지 못해 마지막 값 유지 여부를 점검 중입니다." };
+  }
+  if (mode === "partial_live") {
+    return { label: "partial live", tone: "pending", note: "실시간 후보 흐름이 일부 남아 있어 live 후보와 시장 흐름 row를 함께 보여주고 있습니다." };
+  }
+  if (mode === "fallback") {
+    return { label: "snapshot fallback", tone: "warn", note: status.fallback_reason || "현재는 snapshot fallback 상태입니다." };
+  }
+  if (mode === "last_market") {
+    return { label: "last_market", tone: "info", note: "현재는 마지막 시장 기준 데이터를 보여주고 있습니다." };
+  }
   return { label: "확인 중", tone: "info", note: "실시간 상태를 확인하는 중입니다." };
 }
 
@@ -1596,7 +1651,7 @@ function renderDiagnosticList(container, rows, emptyMessage, mapRow) {
 
 function renderStatus() {
   const status = state.status || {};
-  const sourceInfo = sourceModeStatus(status);
+  const sourceInfo = effectiveSourceModeStatus(status);
   const heartbeatInfo = heartbeatStatus(status);
   const settingsInfo = settingsReflectionStatus(status);
   const diagnosticsInfo = diagnosticsStatus(status);
@@ -1609,16 +1664,17 @@ function renderStatus() {
   el.settingsAppliedLabel.textContent = settingsInfo.label;
   el.heartbeatLabel.textContent = heartbeatInfo.label;
   el.lastSignalLabel.textContent = formatDateTime(status.last_signal_at);
-  el.statusNotice.textContent = status.notice_text || sourceInfo.note;
+  el.statusNotice.textContent = sourceInfo.note || status.notice_text;
   const hasQuietMobileNotice = !(
     diagnosticsInfo.tone === "error"
     || diagnosticsInfo.tone === "warn"
+    || sourceInfo.tone === "warn"
+    || sourceInfo.tone === "pending"
     || status.ready_check_status === "fail"
     || status.ready_check_status === "warn"
     || Boolean(status.last_error_code || status.last_error_message)
   );
   el.statusNotice.classList.toggle("is-quiet", hasQuietMobileNotice);
-
   const chips = [
     { text: `전체 ${status.total_universe_count || status.watchlist_count || 0}종목`, tone: "info" },
     { text: `후보 ${status.current_candidate_count || 0}종목`, tone: "pending" },
@@ -1936,7 +1992,8 @@ function renderSettings() {
 
 function renderSignalList(container, rows, side) {
   upsertDetailIndex(rows);
-  const liveMode = (state.status?.dashboard_source_mode || "last_market") === "live";
+  const effectiveMode = currentLiveCollections().effectiveMode;
+  const liveMode = effectiveMode === "live" || effectiveMode === "partial_live";
   if (!rows.length) {
     container.innerHTML = `<div class="empty">${
       side === "BUY"
@@ -1983,7 +2040,7 @@ function renderSignalList(container, rows, side) {
 function renderMobilePrioritySummary() {
   if (!el.mobileStatusSummary) return;
   const status = state.status || {};
-  const sourceInfo = sourceModeStatus(status);
+  const sourceInfo = effectiveSourceModeStatus(status);
   const settingsInfo = settingsReflectionStatus(status);
   const diagnosticsInfo = diagnosticsStatus(status);
   const activePresetName = status.active_preset_name || status.selected_preset_name;
@@ -2766,11 +2823,12 @@ function renderSettingsV2() {
 }
 
 function renderEarlyDetection() {
-  const earlyRows = [...state.earlyDetectionRows]
+  const liveCollections = currentLiveCollections();
+  const earlyRows = [...liveCollections.earlyRows]
     .sort((a, b) =>
       numberOrZero(b.candidate_quality_score) - numberOrZero(a.candidate_quality_score)
       || numberOrZero(b.candidate_score) - numberOrZero(a.candidate_score));
-  const focusedRows = [...state.focusedRows]
+  const focusedRows = [...liveCollections.focusedRows]
     .sort((a, b) =>
       numberOrZero(a.focus_rank || 999) - numberOrZero(b.focus_rank || 999)
       || numberOrZero(b.candidate_quality_score) - numberOrZero(a.candidate_quality_score));
@@ -2781,12 +2839,12 @@ function renderEarlyDetection() {
   el.earlySummaryCards.innerHTML = [
     {
       label: "초기 포착 후보",
-      value: String(state.status?.current_candidate_count ?? earlyRows.length),
+      value: String(earlyRows.length),
       note: "전체 유니버스 탐지층에서 강도가 붙은 후보 수입니다.",
     },
     {
       label: "집중 감시 종목",
-      value: String(state.status?.current_focused_watchlist_count ?? focusedRows.length),
+      value: String(focusedRows.length),
       note: "websocket 집중 감시 대상으로 승격된 종목 수입니다.",
     },
     {
@@ -2814,6 +2872,14 @@ function renderEarlyDetection() {
     `확정 신호 ${state.status?.confirmed_signal_count ?? 0}건`,
     `false positive ${candidateSummary.false_positive_candidate_count ?? 0}건`,
     `과열 추격 ${numberOrZero(candidateSummary.overextended_candidate_ratio).toFixed(1)}%`,
+  ].map((chip) => `<span class="chip">${escapeHtml(chip)}</span>`).join("");
+  el.focusedSummaryChips.innerHTML = [
+    `?꾩껜 ?좊땲踰꾩뒪 ${state.status?.total_universe_count ?? state.status?.watchlist_count ?? 0}醫낅ぉ`,
+    `?ㅼ틪 吏꾪뻾 ${state.status?.broad_scan_processed_count ?? 0}/${state.status?.total_universe_count ?? state.status?.watchlist_count ?? 0}`,
+    `珥덇린 ?ъ갑 ${earlyRows.length}嫄?`,
+    `?뺤젙 ?좏샇 ${liveCollections.buyRows.length + liveCollections.sellRows.length}嫄?`,
+    `false positive ${candidateSummary.false_positive_candidate_count ?? 0}嫄?`,
+    `怨쇱뿴 異붽꺽 ${numberOrZero(candidateSummary.overextended_candidate_ratio).toFixed(1)}%`,
   ].map((chip) => `<span class="chip">${escapeHtml(chip)}</span>`).join("");
 
   if (!earlyRows.length) {
@@ -3242,11 +3308,14 @@ function render() {
   renderStatus();
   syncMobileOperationalPanels();
   renderSettingsV2();
-  const liveMode = (state.status?.dashboard_source_mode || "last_market") === "live";
-  renderSignalList(el.buySignalList, liveMode ? state.buySignals : [], "BUY");
-  renderSignalList(el.sellSignalList, liveMode ? state.sellSignals : [], "SELL");
+  const liveCollections = currentLiveCollections();
+  const liveMode = liveCollections.effectiveMode === "live" || liveCollections.effectiveMode === "partial_live";
+  renderSignalList(el.buySignalList, liveMode ? liveCollections.buyRows : [], "BUY");
+  renderSignalList(el.sellSignalList, liveMode ? liveCollections.sellRows : [], "SELL");
   el.buySignalCount.textContent = `${state.buySignals.length}건`;
   el.sellSignalCount.textContent = `${state.sellSignals.length}건`;
+  el.buySignalCount.textContent = `${liveCollections.buyRows.length}건`;
+  el.sellSignalCount.textContent = `${liveCollections.sellRows.length}건`;
   renderMobilePrioritySummary();
   renderOverview();
   renderEarlyDetection();
@@ -3512,13 +3581,14 @@ function sessionEventLabel(eventType) {
 
 function renderStatus() {
   const status = state.status || {};
-  const sourceInfo = sourceModeStatus(status);
+  const sourceInfo = effectiveSourceModeStatus(status);
   const heartbeatInfo = heartbeatStatus(status);
   const settingsInfo = settingsReflectionStatus(status);
   const diagnosticsInfo = diagnosticsStatus(status);
   const liveFreshness = numberOrZero(status.live_data_freshness_seconds);
   const regimeLabel = status.current_market_regime_label || status.current_market_regime || "확인 중";
   const activePresetIsTest = isTestPreset(status.active_preset_name || status.selected_preset_name);
+  const liveCollections = currentLiveCollections();
 
   el.marketStatusLabel.textContent = status.market_phase_label || status.market_status_label || "확인 중";
   el.sourceModeLabel.textContent = sourceInfo.label;
@@ -3526,7 +3596,17 @@ function renderStatus() {
   el.settingsAppliedLabel.textContent = settingsInfo.label;
   el.heartbeatLabel.textContent = heartbeatInfo.label;
   el.lastSignalLabel.textContent = formatDateTime(status.last_signal_at);
-  el.statusNotice.textContent = status.notice_text || sourceInfo.note;
+  el.statusNotice.textContent = sourceInfo.note || status.notice_text;
+  const hasQuietMobileNotice = !(
+    diagnosticsInfo.tone === "error"
+    || diagnosticsInfo.tone === "warn"
+    || sourceInfo.tone === "warn"
+    || sourceInfo.tone === "pending"
+    || status.ready_check_status === "fail"
+    || status.ready_check_status === "warn"
+    || Boolean(status.last_error_code || status.last_error_message)
+  );
+  el.statusNotice.classList.toggle("is-quiet", hasQuietMobileNotice);
 
   const chips = [
     { text: `전체 ${status.total_universe_count || status.watchlist_count || 0}종목`, tone: "info" },
@@ -3542,6 +3622,20 @@ function renderStatus() {
     { text: diagnosticsInfo.label, tone: diagnosticsInfo.tone },
   ];
   el.statusChips.innerHTML = chips.map((item) => `<span class="chip ${escapeHtml(item.tone)}">${escapeHtml(item.text)}</span>`).join("");
+  const syncedChips = [
+    { text: `?꾩껜 ${status.total_universe_count || status.watchlist_count || 0}醫낅ぉ`, tone: "info" },
+    { text: `?꾨낫 ${liveCollections.earlyRows.length}醫낅ぉ`, tone: "pending" },
+    { text: `吏묒쨷 媛먯떆 ${liveCollections.focusedRows.length}醫낅ぉ`, tone: "info" },
+    { text: `live tick ${status.live_tick_count || 0}`, tone: "info" },
+    { text: `freshness ${liveFreshness}珥?`, tone: sourceInfo.tone },
+    { text: `?μ꽭 ${regimeLabel}`, tone: regimeTone(status.current_market_regime) },
+    { text: `留ㅼ닔 ${liveCollections.buyRows.length}嫄?`, tone: "buy" },
+    { text: `留ㅻ룄 ${liveCollections.sellRows.length}嫄?`, tone: "sell" },
+    { text: `ready ${status.ready_check_status || "pending"}`, tone: status.ready_check_status === "fail" ? "error" : status.ready_check_status === "warn" ? "warn" : "info" },
+    { text: `tape ${status.recorded_tape_row_count || 0}`, tone: status.tape_recording_enabled ? "info" : "warn" },
+    { text: diagnosticsInfo.label, tone: diagnosticsInfo.tone },
+  ];
+  el.statusChips.innerHTML = syncedChips.map((item) => `<span class="chip ${escapeHtml(item.tone)}">${escapeHtml(item.text)}</span>`).join("");
   if (el.mobileStatusFlags) {
     const mobileFlags = [];
     if (diagnosticsInfo.tone === "error" || diagnosticsInfo.tone === "warn") {
@@ -4700,10 +4794,8 @@ function subscribeTable(tableKey, onChange) {
 }
 
 async function initialLoad() {
+  await Promise.all([fetchPresets(), fetchSettings(), fetchStatus()]);
   await Promise.all([
-    fetchPresets(),
-    fetchSettings(),
-    fetchStatus(),
     fetchBuySignals(),
     fetchSellSignals(),
     fetchOverviewRows(),
@@ -4744,7 +4836,7 @@ async function bootstrap() {
     subscribeTable("buySignals", () => scheduleRefresh("buy", async () => { await fetchBuySignals(); }, render));
     subscribeTable("sellSignals", () => scheduleRefresh("sell", async () => { await fetchSellSignals(); }, render));
     subscribeTable("risingSectorRows", () => scheduleRefresh("overview-live", async () => {
-      if ((state.status?.dashboard_source_mode || "last_market") === "live") await fetchOverviewRows();
+      if (state.status?.market_open) await fetchOverviewRows();
     }, render));
     subscribeTable("earlyDetectionRows", () => scheduleRefresh("early-detection", async () => {
       await fetchEarlyDetectionRows();
@@ -4753,7 +4845,7 @@ async function bootstrap() {
       await fetchFocusedRows();
     }, render));
     subscribeTable("lastMarket", () => scheduleRefresh("overview-last-market", async () => {
-      if ((state.status?.dashboard_source_mode || "last_market") !== "live") await fetchOverviewRows();
+      if (!state.status?.market_open) await fetchOverviewRows();
     }, render));
     subscribeTable("tradeHistory", () => scheduleRefresh("history", async () => {
       await Promise.all([fetchHistoryRows(), fetchSessionReport()]);
