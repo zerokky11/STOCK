@@ -68,6 +68,18 @@
 
     <main class="tab-stack">
       <section class="tab-panel is-active" data-tab-panel="signals">
+        <section class="section mobile-only mobile-priority-panel">
+          <div class="section-head">
+            <div>
+              <h2>모바일 한눈 요약</h2>
+              <p class="section-copy">
+                모바일에서는 지금 바로 봐야 하는 상태만 먼저 모아 보여줍니다. 실시간 신호와 초기 포착 흐름을 빠르게 확인하는 용도입니다.
+              </p>
+            </div>
+          </div>
+          <div class="status-grid compact mobile-status-grid" id="mobileStatusSummary"></div>
+        </section>
+
         <div class="grid-two">
           <section class="section">
             <div class="section-head">
@@ -100,6 +112,19 @@
           </section>
         </div>
 
+        <section class="section mobile-only">
+          <div class="section-head">
+            <div>
+              <h2>초기 포착 미리보기</h2>
+              <p class="section-copy">
+                막 강도가 붙는 종목을 먼저 모아 보여줍니다. 아직 확정 신호 전 단계일 수 있으며, 이후 실시간 신호로 이어질 수 있습니다.
+              </p>
+            </div>
+          </div>
+          <div class="chips" id="mobileEarlySummaryChips"></div>
+          <div class="signal-list" id="mobileEarlyDetectionList"></div>
+        </section>
+
         <section class="section">
           <div class="section-head">
             <div>
@@ -107,11 +132,37 @@
               <p class="section-copy">
                 실시간 데이터가 정상적으로 들어오는지, 설정이 러너에 반영되었는지, fallback 상태는 아닌지를 한눈에 확인할 수 있게 정리했습니다.
               </p>
+              </div>
             </div>
-          </div>
-          <div class="status-grid" id="statusDetailGrid"></div>
-          <div class="status-grid compact" id="operationsGrid"></div>
-          <div class="note-list" id="runtimeNotes"></div>
+            <details class="mobile-only mobile-operations-toggle">
+              <summary>운영 상태 자세히 보기</summary>
+              <div class="status-grid" id="mobileStatusDetailGrid"></div>
+              <div class="status-grid compact" id="mobileOperationsGrid"></div>
+              <div class="note-list" id="mobileRuntimeNotes"></div>
+              <div class="diagnostic-grid mobile-diagnostic-grid">
+                <div class="diagnostic-panel">
+                  <div class="stack-head">
+                    <div>
+                      <h3>최근 진단</h3>
+                      <p class="small">모바일에서는 운영상 꼭 봐야 할 진단만 접어서 확인할 수 있게 정리했습니다.</p>
+                    </div>
+                  </div>
+                  <div class="diagnostic-list" id="mobileDiagnosticList"></div>
+                </div>
+                <div class="diagnostic-panel">
+                  <div class="stack-head">
+                    <div>
+                      <h3>검증 기록</h3>
+                      <p class="small">monitor 모드에서 쌓이는 운영 검증 기록을 모바일에서도 이어서 볼 수 있습니다.</p>
+                    </div>
+                  </div>
+                  <div class="diagnostic-list" id="mobileValidationList"></div>
+                </div>
+              </div>
+            </details>
+            <div class="status-grid" id="statusDetailGrid"></div>
+            <div class="status-grid compact" id="operationsGrid"></div>
+            <div class="note-list" id="runtimeNotes"></div>
           <div class="diagnostic-grid">
             <div class="diagnostic-panel">
               <div class="stack-head">
@@ -707,7 +758,7 @@
           </div>
 
           <div class="table-wrap">
-            <table>
+            <table class="responsive-table responsive-table-history">
               <thead>
                 <tr>
                   <th>발생 시각</th>

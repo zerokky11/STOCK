@@ -70,6 +70,14 @@ h3 {
   padding: 22px 18px 56px;
 }
 
+.mobile-only {
+  display: none;
+}
+
+.desktop-only {
+  display: block;
+}
+
 .hero,
 .section,
 .toolbar-card,
@@ -1028,21 +1036,306 @@ td small {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 768px) {
+  .mobile-only {
+    display: block;
+  }
+
+  .desktop-only {
+    display: none;
+  }
+
   h1 {
-    font-size: 28px;
+    font-size: 26px;
   }
 
   .wrap {
-    padding-left: 14px;
-    padding-right: 14px;
+    padding: 12px 12px 32px;
   }
 
   .sticky-shell {
     top: 0;
+    gap: 10px;
+  }
+
+  .hero,
+  .section,
+  .status-strip,
+  .modal-panel,
+  .tab-nav {
+    border-radius: 20px;
+  }
+
+  .hero {
+    padding: 18px 16px;
+  }
+
+  .section {
+    padding: 16px;
+  }
+
+  .button-row,
+  .section-head,
+  .hero-top {
+    align-items: flex-start;
+  }
+
+  .button-row {
+    width: 100%;
+  }
+
+  .button-row button,
+  .tab-button,
+  .ghost,
+  .secondary,
+  .primary {
+    min-height: 44px;
+  }
+
+  .tab-nav {
+    position: sticky;
+    top: 0;
+    z-index: 35;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 8px;
+    padding: 8px;
+    scrollbar-width: none;
+  }
+
+  .tab-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .tab-button {
-    flex-basis: 100%;
+    flex: 0 0 auto;
+    min-width: 132px;
+    padding: 13px 16px;
+    font-size: 14px;
+  }
+
+  .toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .toolbar-card {
+    min-height: 78px;
+    padding: 12px 14px;
+  }
+
+  .grid-two,
+  .settings-layout,
+  .diagnostic-grid,
+  .history-summary-grid,
+  .meta-grid,
+  .status-grid,
+  .status-grid.compact,
+  .settings-grid,
+  .preset-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .mobile-priority-panel {
+    margin-bottom: 4px;
+  }
+
+  .mobile-status-grid {
+    margin-top: 14px;
+    grid-template-columns: 1fr;
+  }
+
+  .mobile-status-item {
+    min-height: 84px;
+  }
+
+  .signal-list {
+    gap: 12px;
+  }
+
+  .signal-card {
+    padding: 14px;
+  }
+
+  .signal-head,
+  .signal-meta {
+    gap: 10px;
+  }
+
+  .signal-head .button-row {
+    justify-content: flex-start;
+  }
+
+  .mobile-preview-card .signal-summary {
+    margin-top: 10px;
+    font-size: 14px;
+  }
+
+  .mobile-operations-toggle {
+    margin-top: 14px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: rgba(255, 250, 244, 0.94);
+    overflow: hidden;
+  }
+
+  .mobile-operations-toggle > summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 14px 16px;
+    font-weight: 760;
+  }
+
+  .mobile-operations-toggle > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .mobile-operations-toggle .status-grid,
+  .mobile-operations-toggle .status-grid.compact,
+  .mobile-operations-toggle .note-list,
+  .mobile-operations-toggle .diagnostic-grid {
+    margin: 0;
+    padding: 0 14px 14px;
+  }
+
+  .mobile-diagnostic-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tab-panel[data-tab-panel="signals"] > .section:last-child > #statusDetailGrid,
+  .tab-panel[data-tab-panel="signals"] > .section:last-child > #operationsGrid,
+  .tab-panel[data-tab-panel="signals"] > .section:last-child > #runtimeNotes,
+  .tab-panel[data-tab-panel="signals"] > .section:last-child > .diagnostic-grid {
+    display: none;
+  }
+
+  .table-wrap {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+    border-radius: 0;
+    margin-top: 14px;
+  }
+
+  .responsive-table {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .responsive-table thead {
+    display: none;
+  }
+
+  .responsive-table,
+  .responsive-table tbody,
+  .responsive-table tr,
+  .responsive-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .responsive-table tbody {
+    display: grid;
+    gap: 12px;
+  }
+
+  .responsive-table tr {
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--panel-strong);
+  }
+
+  .responsive-table td {
+    min-width: 0;
+    padding: 8px 0;
+    border-bottom: 0;
+    display: grid;
+    grid-template-columns: minmax(82px, 108px) minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+  }
+
+  .responsive-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .responsive-table td[data-label="자세히"] {
+    grid-template-columns: 1fr;
+    padding-top: 10px;
+  }
+
+  .responsive-table td[data-label="자세히"]::before {
+    display: none;
+  }
+
+  .responsive-table td[data-label="자세히"] button {
+    width: 100%;
+  }
+
+  .responsive-table td strong,
+  .responsive-table td small {
+    word-break: keep-all;
+  }
+
+  .filter-row {
+    gap: 10px;
+  }
+
+  .history-filter {
+    min-width: 100%;
+  }
+
+  .field-card input,
+  .field-card select,
+  .history-filter select,
+  .history-filter input {
+    min-height: 46px;
+  }
+
+  .field-help,
+  .field-detail,
+  .small,
+  .section-copy,
+  .copy {
+    font-size: 14px;
+    line-height: 1.65;
+  }
+
+  .modal-panel {
+    width: 100%;
+    max-height: none;
+    height: 100dvh;
+    margin: 0;
+    padding: 18px 14px 28px;
+    border-radius: 24px 24px 0 0;
+  }
+
+  .close-button {
+    top: 0;
+    z-index: 2;
+    min-height: 44px;
+  }
+
+  .detail-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .detail-item,
+  .status-item,
+  .meta-card,
+  .list-card,
+  .diagnostic-item,
+  .analysis-card,
+  .recommendation-card,
+  .similar-session-card {
+    padding: 14px;
   }
 }

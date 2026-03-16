@@ -615,6 +615,14 @@ const el = {
   sellSignalCount: document.getElementById("sellSignalCount"),
   buySignalList: document.getElementById("buySignalList"),
   sellSignalList: document.getElementById("sellSignalList"),
+  mobileStatusSummary: document.getElementById("mobileStatusSummary"),
+  mobileEarlySummaryChips: document.getElementById("mobileEarlySummaryChips"),
+  mobileEarlyDetectionList: document.getElementById("mobileEarlyDetectionList"),
+  mobileStatusDetailGrid: document.getElementById("mobileStatusDetailGrid"),
+  mobileOperationsGrid: document.getElementById("mobileOperationsGrid"),
+  mobileRuntimeNotes: document.getElementById("mobileRuntimeNotes"),
+  mobileDiagnosticList: document.getElementById("mobileDiagnosticList"),
+  mobileValidationList: document.getElementById("mobileValidationList"),
   overviewBoard: document.getElementById("overviewBoard"),
   earlySummaryCards: document.getElementById("earlySummaryCards"),
   focusedSummaryChips: document.getElementById("focusedSummaryChips"),
@@ -1663,13 +1671,17 @@ function renderStatus() {
       note: "절대 거래대금은 메인 기준이 아니라 유동성이 너무 약한 경우만 걸러내는 안전 하한입니다.",
     },
   ];
-  el.statusDetailGrid.innerHTML = detailCards.map((item) => `
+  const detailMarkup = detailCards.map((item) => `
     <article class="status-item">
       <strong>${escapeHtml(item.label)}</strong>
       <span>${escapeHtml(item.value || "-")}</span>
       <p>${escapeHtml(item.note || "")}</p>
     </article>
   `).join("");
+  el.statusDetailGrid.innerHTML = detailMarkup;
+  if (el.mobileStatusDetailGrid) {
+    el.mobileStatusDetailGrid.innerHTML = detailMarkup;
+  }
 
   const operationCards = [
     { label: "운영 모드", value: sourceInfo.label, note: sourceInfo.note },
@@ -1680,13 +1692,17 @@ function renderStatus() {
     { label: "감시 규모", value: `${status.live_shard_count || 0} shard / ${status.live_codes_per_session || 0}개`, note: `승격 ${status.candidate_promotions_today || 0}회 / 강등 ${status.candidate_demotions_today || 0}회` },
     { label: "진단 상태", value: diagnosticsInfo.label, note: diagnosticsInfo.note },
   ];
-  el.operationsGrid.innerHTML = operationCards.map((item) => `
+  const operationsMarkup = operationCards.map((item) => `
     <article class="status-item">
       <strong>${escapeHtml(item.label)}</strong>
       <span>${escapeHtml(item.value || "-")}</span>
       <p>${escapeHtml(item.note || "")}</p>
     </article>
   `).join("");
+  el.operationsGrid.innerHTML = operationsMarkup;
+  if (el.mobileOperationsGrid) {
+    el.mobileOperationsGrid.innerHTML = operationsMarkup;
+  }
 
   const notes = [...safeArray(status.runtime_notes), ...Array.from(state.setupNotes)];
   el.runtimeNotes.innerHTML = notes.length
@@ -1699,6 +1715,10 @@ function renderStatus() {
       return `<div class="note-item ${tone}">${escapeHtml(note)}</div>`;
     }).join("")
     : `<div class="empty">운영 메모가 아직 없습니다.</div>`;
+
+  if (el.mobileRuntimeNotes) {
+    el.mobileRuntimeNotes.innerHTML = el.runtimeNotes.innerHTML;
+  }
 
   renderDiagnosticList(
     el.diagnosticList,
@@ -1729,6 +1749,38 @@ function renderStatus() {
       </article>
     `,
   );
+  if (el.mobileDiagnosticList) {
+    renderDiagnosticList(
+      el.mobileDiagnosticList,
+      state.diagnosticsRows,
+      "理쒓렐 吏꾨떒 湲곕줉???꾩쭅 ?놁뒿?덈떎.",
+      (row) => `
+        <article class="diagnostic-item ${escapeHtml(String(row.severity || "info").toLowerCase())}">
+          <strong>
+            <span>${escapeHtml(row.kind || "diagnostic")}</span>
+            <span>${escapeHtml(formatDateTime(row.created_at))}</span>
+          </strong>
+          <p>${escapeHtml(row.message || "?곸꽭 硫붿떆吏媛 ?놁뒿?덈떎.")}</p>
+        </article>
+      `,
+    );
+  }
+  if (el.mobileValidationList) {
+    renderDiagnosticList(
+      el.mobileValidationList,
+      state.validationRows,
+      "理쒓렐 寃利?湲곕줉???꾩쭅 ?놁뒿?덈떎.",
+      (row) => `
+        <article class="diagnostic-item ${escapeHtml(String(row.severity || "info").toLowerCase())}">
+          <strong>
+            <span>${escapeHtml(row.kind || "validation")}</span>
+            <span>${escapeHtml(formatDateTime(row.created_at || row.event_time))}</span>
+          </strong>
+          <p>${escapeHtml(row.message || row.summary || "?곸꽭 硫붿떆吏媛 ?놁뒿?덈떎.")}</p>
+        </article>
+      `,
+    );
+  }
 }
 
 function syncSettingsInputs(inputRow) {
@@ -1914,6 +1966,76 @@ function renderSignalList(container, rows, side) {
       </article>
     `;
   }).join("");
+}
+
+function renderMobilePrioritySummary() {
+  if (!el.mobileStatusSummary) return;
+  const status = state.status || {};
+  const sourceInfo = sourceModeStatus(status);
+  const heartbeatInfo = heartbeatStatus(status);
+  const liveFreshness = numberOrZero(status.live_data_freshness_seconds);
+  const cards = [
+    {
+      label: "시장 상태",
+      value: status.market_phase_label || status.market_status_label || "확인 중",
+      note: status.current_market_regime_label || status.current_market_regime || "장세 해석 대기 중",
+    },
+    {
+      label: "실시간 상태",
+      value: sourceInfo.label || "확인 중",
+      note: `live ${status.live_state || "-"} / freshness ${liveFreshness.toFixed(0)}초`,
+    },
+    {
+      label: "heartbeat",
+      value: heartbeatInfo.label || "확인 중",
+      note: `마지막 틱 ${formatDateTime(status.live_last_tick_at)}`,
+    },
+    {
+      label: "tape recording",
+      value: status.tape_recording_enabled ? "기록 중" : "꺼짐",
+      note: `rows ${status.recorded_tape_row_count || 0} / last ${formatDateTime(status.last_tape_write_time)}`,
+    },
+  ];
+
+  el.mobileStatusSummary.innerHTML = cards.map((item) => `
+    <article class="status-item mobile-status-item">
+      <strong>${escapeHtml(item.label)}</strong>
+      <span>${escapeHtml(item.value || "-")}</span>
+      <p>${escapeHtml(item.note || "")}</p>
+    </article>
+  `).join("");
+}
+
+function decorateResponsiveTables() {
+  document.querySelectorAll(".responsive-table").forEach((table) => {
+    const headers = Array.from(table.querySelectorAll("thead th")).map((cell) => cell.textContent.trim() || "");
+    table.querySelectorAll("tbody tr").forEach((row) => {
+      Array.from(row.children).forEach((cell, index) => {
+        if (!(cell instanceof HTMLElement)) return;
+        if (!cell.dataset.label) {
+          cell.dataset.label = headers[index] || "";
+        }
+      });
+    });
+  });
+}
+
+function syncMobileOperationalPanels() {
+  if (el.mobileStatusDetailGrid) {
+    el.mobileStatusDetailGrid.innerHTML = el.statusDetailGrid?.innerHTML || "";
+  }
+  if (el.mobileOperationsGrid) {
+    el.mobileOperationsGrid.innerHTML = el.operationsGrid?.innerHTML || "";
+  }
+  if (el.mobileRuntimeNotes) {
+    el.mobileRuntimeNotes.innerHTML = el.runtimeNotes?.innerHTML || "";
+  }
+  if (el.mobileDiagnosticList) {
+    el.mobileDiagnosticList.innerHTML = el.diagnosticList?.innerHTML || "";
+  }
+  if (el.mobileValidationList) {
+    el.mobileValidationList.innerHTML = el.validationList?.innerHTML || "";
+  }
 }
 
 function tableThresholdSummaryV2(snapshot) {
@@ -2728,6 +2850,60 @@ function renderEarlyDetection() {
       `;
     }).join("");
   }
+  if (el.mobileEarlySummaryChips && el.mobileEarlyDetectionList) {
+    const previewRows = [];
+    const seen = new Set();
+    focusedRows.slice(0, 2).forEach((row) => {
+      const key = row.candidate_id || row.code;
+      if (seen.has(key)) return;
+      seen.add(key);
+      previewRows.push({ ...row, _mobile_kind: "focused" });
+    });
+    earlyRows.slice(0, 4).forEach((row) => {
+      const key = row.candidate_id || row.code;
+      if (seen.has(key) || previewRows.length >= 4) return;
+      seen.add(key);
+      previewRows.push({ ...row, _mobile_kind: "early" });
+    });
+
+    el.mobileEarlySummaryChips.innerHTML = [
+      `초기 포착 ${state.status?.current_candidate_count ?? earlyRows.length}종목`,
+      `집중 감시 ${state.status?.current_focused_watchlist_count ?? focusedRows.length}종목`,
+      `확정 신호 ${state.status?.confirmed_signal_count ?? 0}건`,
+    ].map((chip) => `<span class="chip">${escapeHtml(chip)}</span>`).join("");
+
+    el.mobileEarlyDetectionList.innerHTML = previewRows.length
+      ? previewRows.map((row) => {
+        const detail = detailFromRow(row);
+        const key = row.candidate_id || row.code;
+        const isFocused = row._mobile_kind === "focused";
+        return `
+          <article class="signal-card mobile-preview-card">
+            <div class="signal-head">
+              <div>
+                <h3>${escapeHtml(row.name)} <span class="muted">${escapeHtml(row.code)}</span></h3>
+                <div class="signal-meta">${escapeHtml(row.market || "-")} / ${escapeHtml(row.sector || "섹터 확인 중")} / ${escapeHtml(row.detection_type || detail.signal_type || "-")}</div>
+              </div>
+              <div class="button-row">
+                <span class="tag ${isFocused ? "buy" : "info"}">${isFocused ? "집중 감시" : "초기 포착"}</span>
+                <button class="ghost" data-detail-id="${escapeHtml(key)}" type="button">자세히</button>
+              </div>
+            </div>
+            <div class="signal-tags">
+              <span class="tag">등락 ${formatPct(detail.change_rate || row.change_rate || 0)}</span>
+              <span class="tag">품질 ${numberOrZero(row.candidate_quality_score ?? detail.candidate_quality_score).toFixed(1)}</span>
+              <span class="tag">RVOL ${numberOrZero(detail.rvol).toFixed(2)}</span>
+              <span class="tag">turnover ${formatRatioPct(detail.turnover_ratio)}</span>
+            </div>
+            <p class="signal-summary">${escapeHtml((safeArray(detail.quality_good_reasons)[0]) || row.summary || "강도가 붙는 흐름을 우선 추적하는 후보입니다.")}</p>
+            ${safeArray(detail.quality_caution_reasons)[0]
+              ? `<div class="signal-tags"><span class="tag warn">${escapeHtml(safeArray(detail.quality_caution_reasons)[0])}</span></div>`
+              : ""}
+          </article>
+        `;
+      }).join("")
+      : '<div class="empty">모바일 첫 화면에 보여줄 초기 포착 후보가 아직 없습니다.</div>';
+  }
 }
 
 function renderOverview() {
@@ -2752,7 +2928,7 @@ function renderOverview() {
         <span class="chip">${sectorRows.length}종목</span>
       </div>
       <div class="table-wrap">
-        <table>
+        <table class="responsive-table responsive-table-market">
           <thead>
             <tr>
               <th>종목</th>
@@ -2768,12 +2944,12 @@ function renderOverview() {
           <tbody>
             ${sectorRows.map((row) => `
               <tr>
-                <td><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.code)}</small></td>
-                <td>${escapeHtml(row.market || "-")}</td>
-                <td>${escapeHtml(formatPrice(row.price || 0))}</td>
-                <td>${escapeHtml(formatPct(row.change_rate || 0))}</td>
-                <td>${escapeHtml(formatEok(row.trade_value_eok || 0))}</td>
-                <td>${numberOrZero(row.score || 0).toFixed(1)}</td>
+                <td data-label="종목"><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.code)}</small></td>
+                <td data-label="시장">${escapeHtml(row.market || "-")}</td>
+                <td data-label="현재가">${escapeHtml(formatPrice(row.price || 0))}</td>
+                <td data-label="등락률">${escapeHtml(formatPct(row.change_rate || 0))}</td>
+                <td data-label="거래대금">${escapeHtml(formatEok(row.trade_value_eok || 0))}</td>
+                <td data-label="평가점수">${numberOrZero(row.score || 0).toFixed(1)}</td>
                 <td><small>${escapeHtml(row.note || detailFromRow(row).signal_summary || "시장 흐름 관찰용 행입니다.")}</small></td>
                 <td><button class="ghost" data-detail-id="${escapeHtml(row.signal_id || row.position_id || row.code)}" type="button">자세히</button></td>
               </tr>
@@ -3009,15 +3185,18 @@ function openDetailV2(key) {
 
 function render() {
   renderStatus();
+  syncMobileOperationalPanels();
   renderSettingsV2();
   const liveMode = (state.status?.dashboard_source_mode || "last_market") === "live";
   renderSignalList(el.buySignalList, liveMode ? state.buySignals : [], "BUY");
   renderSignalList(el.sellSignalList, liveMode ? state.sellSignals : [], "SELL");
   el.buySignalCount.textContent = `${state.buySignals.length}건`;
   el.sellSignalCount.textContent = `${state.sellSignals.length}건`;
+  renderMobilePrioritySummary();
   renderOverview();
   renderEarlyDetection();
   renderHistory();
+  decorateResponsiveTables();
 }
 
 const closeDetail = () => el.detailModal.classList.remove("open");
