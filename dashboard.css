@@ -711,6 +711,36 @@ td small {
   font-weight: 700;
 }
 
+.diagnostic-detail {
+  margin-top: 8px;
+}
+
+.diagnostic-detail summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.diagnostic-detail summary::-webkit-details-marker {
+  display: none;
+}
+
+.diagnostic-detail pre {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(76, 57, 45, 0.06);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.45;
+  max-height: 220px;
+  overflow: auto;
+}
+
 .mono {
   font-family: var(--mono);
 }
@@ -936,6 +966,19 @@ td small {
   white-space: nowrap;
 }
 
+.market-flow-table thead th {
+  background: rgba(127, 93, 69, 0.08);
+}
+
+.market-flow-table tbody tr:hover {
+  background: rgba(166, 75, 31, 0.05);
+}
+
+.market-flow-table td small {
+  display: block;
+  margin-top: 4px;
+}
+
 .timeline-time {
   font-size: 13px;
   font-weight: 700;
@@ -1139,7 +1182,7 @@ td small {
   }
 
   .hero {
-    padding: 14px 14px 12px;
+    padding: 12px 14px 10px;
   }
 
   .section {
@@ -1313,6 +1356,13 @@ td small {
     display: none;
   }
 
+  #statusDetailGrid,
+  #operationsGrid,
+  #runtimeNotes,
+  .tab-panel[data-tab-panel="signals"] > .section:last-child > .diagnostic-grid {
+    display: none;
+  }
+
   .mobile-hero-copy {
     margin-top: 6px;
     font-size: 13px;
@@ -1340,7 +1390,7 @@ td small {
   }
 
   .status-strip {
-    padding: 10px 10px 10px;
+    padding: 8px 10px;
   }
 
   .toolbar-card:nth-child(5),
@@ -1356,10 +1406,10 @@ td small {
   }
 
   .status-banner {
-    margin-top: 8px;
-    padding: 9px 10px;
+    margin-top: 6px;
+    padding: 8px 9px;
     font-size: 12px;
-    line-height: 1.45;
+    line-height: 1.35;
   }
 
   .status-banner.is-quiet {

@@ -2082,9 +2082,9 @@ function renderMobilePrioritySummary() {
       note: settingsInfo.note || "?꾩옱 ?곸슜 以묒씤 ?ㅼ젙 諛섏쁺 ?곹깭瑜?蹂댁뿬以띾땲??",
     },
     {
-      label: "寃쎄퀬 ?좊Ц",
-      value: diagnosticsInfo.label || "?뺤씤 以?",
-      note: diagnosticsInfo.note || "?곸슜?먯꽌 ?뺤씤???⑥쐞 寃쎄퀬 ?곹깭瑜?蹂댁뿬以띾땲??",
+      label: "경고 여부",
+      value: diagnosticsInfo.label || "확인 중",
+      note: diagnosticsInfo.note || "운영상 먼저 확인해야 할 경고 상태를 보여줍니다.",
     },
   ];
   el.mobileStatusSummary.innerHTML = compactCards.map((item) => `
@@ -3212,7 +3212,7 @@ function decorateSignedMetrics() {
     node.classList.add("signed-value", signedTone(value), "subtle");
   });
 
-  document.querySelectorAll(".signal-tags .tag, .detail-item strong, .responsive-table td, .list-card span").forEach((node) => {
+  document.querySelectorAll(".signal-tags .tag, .detail-item strong, .responsive-table td, .list-card span, .status-item span, .meta-card span, .comparison-value").forEach((node) => {
     if (!(node instanceof HTMLElement)) return;
     if (node.dataset.signedValue || node.dataset.priceDirection) return;
     const text = (node.textContent || "").trim();
@@ -3792,7 +3792,7 @@ function renderStatus() {
       });
     }
     if (status.last_error_code || status.last_error_message) {
-      mobileFlags.push({ text: "?ㅻ쪟 ?덉쓬", tone: "error" });
+      mobileFlags.push({ text: "오류 있음", tone: "error" });
     }
     if (status.tape_recording_enabled === false) {
       mobileFlags.push({ text: "tape 湲곕줉 ?앹꽦", tone: "warn" });
@@ -3815,10 +3815,10 @@ function renderStatus() {
         ? "warn"
         : "info";
     const badgeText = diagnosticsInfo.tone === "error"
-      ? "?ㅻ쪟"
+      ? "오류"
       : diagnosticsInfo.tone === "warn" || status.ready_check_status === "warn"
-        ? "寃쎄퀬"
-        : "?뺤긽";
+        ? "경고"
+        : "정상";
     el.mobileStatusDetailBadge.className = `chip ${badgeTone}`;
     el.mobileStatusDetailBadge.textContent = badgeText;
     el.mobileStatusDetailBadge.hidden = !hasStatusIssue;
@@ -5093,6 +5093,643 @@ function wireEvents() {
       activateTab(tabTargetButton.getAttribute("data-tab-target"));
     }
   });
+}
+
+const STRICT_REALTIME_ROW_STALE_SECONDS = 180;
+const STRICT_LIVE_FRESHNESS_SECONDS = 150;
+
+function isFreshRealtimeRowStrict(row) {
+  const timestamp = rowActivityTime(row);
+  if (!timestamp) return true;
+  return secondsSince(timestamp) <= STRICT_REALTIME_ROW_STALE_SECONDS;
+}
+
+function hasUsableLiveStatus(status) {
+  if (!status) return false;
+  const liveState = String(status.live_state || "").toLowerCase();
+  const freshness = numberOrZero(status.live_data_freshness_seconds);
+  if (liveState === "ok") return true;
+  if (liveState === "delayed" && freshness <= STRICT_LIVE_FRESHNESS_SECONDS) return true;
+  if (status.live_last_tick_at && freshness <= STRICT_LIVE_FRESHNESS_SECONDS) return true;
+  return false;
+}
+
+function summarizeErrorMessage(message, code = "") {
+  const raw = String(message || "").replace(/\s+/g, " ").trim();
+  const shortCode = String(code || "").trim();
+  if (!raw) {
+    return {
+      label: shortCode || "최근 오류 있음",
+      short: "최근 오류가 감지되었습니다.",
+      detail: "",
+    };
+  }
+  const source = `${shortCode} ${raw}`;
+  if (/521|web server is down/i.test(source)) {
+    return { label: shortCode || "521", short: "521 Web server is down", detail: raw };
+  }
+  if (/502|bad gateway/i.test(source)) {
+    return { label: shortCode || "502", short: "502 Bad gateway", detail: raw };
+  }
+  if (/timed out|timeout/i.test(raw)) {
+    return { label: shortCode || "timeout", short: "Read timed out", detail: raw };
+  }
+  if (/connection aborted|econnreset|connection reset/i.test(raw)) {
+    return { label: shortCode || "aborted", short: "Connection aborted", detail: raw };
+  }
+  if (/<html|<!doctype html|cloudflare/i.test(raw)) {
+    return {
+      label: shortCode || "HTML 오류 응답",
+      short: shortCode ? `${shortCode} HTML 응답` : "HTML 오류 응답",
+      detail: raw,
+    };
+  }
+  return {
+    label: shortCode || "최근 오류 있음",
+    short: raw.length > 96 ? `${raw.slice(0, 96)}…` : raw,
+    detail: raw,
+  };
+}
+
+function diagnosticSummary(row) {
+  const details = parseMaybeJson(row?.details, {});
+  const code = row?.code || details?.code || row?.status_code || "";
+  const message = row?.message || details?.message || details?.error || row?.summary || "";
+  return summarizeErrorMessage(message, code);
+}
+
+function diagnosticMessageMarkup(row) {
+  const summary = diagnosticSummary(row);
+  const showDetail = summary.detail && summary.detail !== summary.short;
+  return `
+    <p>${escapeHtml(summary.short || "상세 메시지가 없습니다.")}</p>
+    ${showDetail ? `
+      <details class="diagnostic-detail">
+        <summary>자세히 보기</summary>
+        <pre>${escapeHtml(summary.detail)}</pre>
+      </details>
+    ` : ""}
+  `;
+}
+
+function currentLiveCollections() {
+  const buyRows = (state.buySignals || []).filter(isFreshRealtimeRowStrict);
+  const sellRows = (state.sellSignals || []).filter(isFreshRealtimeRowStrict);
+  const earlyRows = (state.earlyDetectionRows || []).filter(isFreshRealtimeRowStrict);
+  const focusedRows = (state.focusedRows || []).filter(isFreshRealtimeRowStrict);
+  const liveRowCount = buyRows.length + sellRows.length + earlyRows.length + focusedRows.length;
+  const status = state.status || {};
+  const baseMode = status.dashboard_source_mode || (status.market_open ? "fallback" : "last_market");
+  const liveHealthy = hasUsableLiveStatus(status);
+  const heartbeatFresh = secondsSince(status.producer_heartbeat_at || status.updated_at) <= 60;
+  let effectiveMode = baseMode;
+  if (baseMode === "live" && liveHealthy) {
+    effectiveMode = "live";
+  } else if (status.market_open && liveRowCount > 0 && liveHealthy) {
+    effectiveMode = "partial_live";
+  } else if (status.market_open && liveRowCount > 0 && heartbeatFresh) {
+    effectiveMode = "recovering";
+  } else if (status.market_open) {
+    effectiveMode = "fallback";
+  } else {
+    effectiveMode = "last_market";
+  }
+  return { buyRows, sellRows, earlyRows, focusedRows, liveRowCount, liveHealthy, effectiveMode };
+}
+
+function sourceModeStatus(status) {
+  return effectiveSourceModeStatus(status);
+}
+
+function effectiveSourceModeStatus(status) {
+  const collections = currentLiveCollections();
+  const mode = collections.effectiveMode || status.dashboard_source_mode || "last_market";
+  const liveState = String(status.live_state || "stopped").toLowerCase();
+  if (mode === "live" && liveState === "ok") {
+    return { label: "live 정상", tone: "ok", note: "실시간 데이터가 정상적으로 들어오고 있습니다." };
+  }
+  if (mode === "live" && liveState === "delayed") {
+    return { label: "live 지연", tone: "pending", note: "최근 틱 수신이 조금 늦지만 실시간 흐름은 유지되고 있습니다." };
+  }
+  if (mode === "partial_live") {
+    return { label: "partial live", tone: "pending", note: "실시간 후보 또는 신호 일부가 유지되고 있어 live 흐름과 overview를 함께 보여주고 있습니다." };
+  }
+  if (mode === "recovering") {
+    return { label: "recovering", tone: "warn", note: "최근 row는 남아 있지만 live tick이 충분히 새롭지 않아 복구 중으로 보고 있습니다." };
+  }
+  if (mode === "fallback") {
+    return { label: "snapshot fallback", tone: "warn", note: status.fallback_reason || "현재는 snapshot fallback 기준 데이터로 화면을 유지하고 있습니다." };
+  }
+  if (mode === "last_market") {
+    return { label: "last_market", tone: "info", note: "현재는 마지막 시장 기준 데이터를 보여주고 있습니다." };
+  }
+  if (liveState === "stale") {
+    return { label: "live stale", tone: "warn", note: "실시간 데이터가 멈춰 마지막 값을 유지하고 있습니다." };
+  }
+  return { label: "확인 중", tone: "info", note: "실시간 상태를 확인하는 중입니다." };
+}
+
+function heartbeatStatus(status) {
+  const age = secondsSince(status.producer_heartbeat_at || status.updated_at);
+  if (!status.producer_heartbeat_at && !status.updated_at) {
+    return { label: "producer 미시작", tone: "warn", note: "producer가 아직 시작되지 않았습니다." };
+  }
+  if (age <= 15) return { label: "정상", tone: "ok", note: `최근 ${age}초 전에 heartbeat가 갱신됐습니다.` };
+  if (age <= 45) return { label: "지연", tone: "pending", note: `최근 ${age}초 전에 heartbeat가 들어왔습니다.` };
+  return { label: "멈춤 의심", tone: "error", note: `${age}초 동안 heartbeat가 갱신되지 않았습니다.` };
+}
+
+function settingsReflectionStatus(status) {
+  const savedAt = status.last_settings_save_at || state.settingsRow?.updated_at || "";
+  const appliedAt = status.signal_settings_applied_at || "";
+  if (state.settingsFetchState?.status === "stale-keep") {
+    return {
+      label: "마지막 성공 상태 유지",
+      tone: "warn",
+      note: state.settingsFetchState.note || "설정 읽기 실패로 마지막 성공 상태를 유지합니다.",
+    };
+  }
+  if (!savedAt) return { label: "확인 중", tone: "info", note: "아직 저장된 설정 시각을 받지 못했습니다." };
+  if (!appliedAt) return { label: "반영 대기", tone: "pending", note: `저장 ${formatDateTime(savedAt)} / 러너가 새 기준을 다시 읽는 중입니다.` };
+  const savedMs = new Date(savedAt).getTime();
+  const appliedMs = new Date(appliedAt).getTime();
+  if (!Number.isNaN(savedMs) && !Number.isNaN(appliedMs) && appliedMs >= savedMs - 1000) {
+    const autoEnabled = Boolean(status.auto_preset_enabled ?? state.settingsRow?.auto_preset_enabled);
+    return {
+      label: autoEnabled ? "자동추천 반영 완료" : "수동 설정 유지 중",
+      tone: "ok",
+      note: autoEnabled
+        ? `저장 ${formatDateTime(savedAt)} / 적용 ${formatDateTime(appliedAt)} / 자동추천이 현재 기준을 덮어쓰는 중입니다.`
+        : `저장 ${formatDateTime(savedAt)} / 적용 ${formatDateTime(appliedAt)} / 수동으로 저장한 값을 유지하고 있습니다.`,
+    };
+  }
+  return { label: "반영 대기", tone: "pending", note: `저장 ${formatDateTime(savedAt)} / 마지막 적용 ${formatDateTime(appliedAt)}` };
+}
+
+function diagnosticsStatus(status) {
+  if (!status.settings_table_available) {
+    return { label: "signal_settings 미구성", tone: "warn", note: "signal_settings 테이블이 아직 없어 기본 설정으로 동작 중입니다." };
+  }
+  if (!status.presets_table_available) {
+    return { label: "preset fallback 사용 중", tone: "warn", note: "signal_presets가 없어 내장 추천값을 사용 중입니다." };
+  }
+  if (status.last_error_message) {
+    const errorInfo = summarizeErrorMessage(status.last_error_message, status.last_error_code);
+    return {
+      label: errorInfo.label || "최근 오류 있음",
+      tone: "error",
+      note: errorInfo.short,
+      detail: errorInfo.detail,
+    };
+  }
+  return { label: "최근 오류 없음", tone: "ok", note: "최근 진단 항목에서 치명적인 오류를 받지 않았습니다." };
+}
+
+function historyAnalytics(rows) {
+  const closed = rows.filter((row) => row.status === "CLOSED");
+  const wins = closed.filter((row) => numberOrZero(row.realized_pnl_pct) > 0);
+  const openRows = rows.filter((row) => row.status === "OPEN");
+  const sessionSummary = parseMaybeJson(state.sessionReport?.summary, {});
+  const overall = sessionSummary.overall || {};
+  const candidateSummary = sessionSummary.candidate_summary || {};
+  const detectionSummary = safeArray(sessionSummary.by_detection_type);
+  const conversionSummary = safeArray(sessionSummary.by_conversion);
+  const avgClosedPnl = closed.length ? closed.reduce((sum, row) => sum + numberOrZero(row.realized_pnl_pct), 0) / closed.length : 0;
+  const avgHolding = rows.length ? rows.reduce((sum, row) => sum + numberOrZero(row.holding_seconds), 0) / rows.length : 0;
+  const winRate = closed.length ? (wins.length / closed.length) * 100 : 0;
+
+  return {
+    cards: [
+      { label: "오늘 매수 신호", value: String(sessionSummary.today_buy_signals ?? state.buySignals.length), note: "오늘 발생한 매수 이벤트 수입니다." },
+      { label: "오늘 매도 신호", value: String(sessionSummary.today_sell_signals ?? state.sellSignals.length), note: "오늘 발생한 매도 이벤트 수입니다." },
+      { label: "종료 거래", value: String(overall.closed_count ?? closed.length), note: `진행 중 ${overall.open_count ?? openRows.length}건` },
+      { label: "평균 수익률", value: `${numberOrZero(overall.avg_pnl_pct ?? avgClosedPnl).toFixed(2)}%`, note: `승률 ${numberOrZero(overall.win_rate ?? winRate).toFixed(1)}%` },
+      { label: "초기 포착", value: String(candidateSummary.early_detection_count ?? 0), note: "전체 유니버스 탐지층에서 먼저 포착한 후보 수입니다." },
+      { label: "후보 승격", value: String(candidateSummary.promotion_count ?? 0), note: "집중 실시간 감시 대상으로 승격된 후보 수입니다." },
+      {
+        label: "후보→신호 전환",
+        value: `${numberOrZero(candidateSummary.candidate_to_signal_conversion_rate).toFixed(1)}%`,
+        note: `평균 ${numberOrZero(candidateSummary.avg_minutes_to_signal).toFixed(1)}분 안에 확정 신호로 이어졌습니다.`,
+      },
+    ],
+    chips: [
+      `기록 ${rows.length}건`,
+      `종료 ${closed.length}건`,
+      `진행 중 ${openRows.length}건`,
+      `평균 보유 ${rows.length ? formatHolding(avgHolding) : "-"}`,
+      `평균 수익률 ${closed.length ? avgClosedPnl.toFixed(2) : "0.00"}%`,
+      `초기 포착 ${candidateSummary.early_detection_count ?? 0}건`,
+      `후보 승격 ${candidateSummary.promotion_count ?? 0}건`,
+      `실패/강등 ${candidateSummary.demotion_count ?? 0}건`,
+    ],
+    summaries: [
+      ...summarizeCounts(closed, (row) => row.buy_signal_type || row.sell_signal_type || "기타", "신호 "),
+      ...summarizeCounts(closed, (row) => row.preset_label || row.preset_name || "사용자 설정", "preset "),
+      ...summarizeCounts(closed, (row) => row.sector || "기타", "섹터 "),
+      ...summarizeCounts(closed, (row) => row.result_status || row.status || "기타", "결과 "),
+      ...detectionSummary.slice(0, 2).map((item) => `초기 포착 ${item.label} ${item.count}건`),
+      ...conversionSummary.slice(0, 2).map((item) => `전환 ${item.label} ${item.count}건`),
+    ].slice(0, 8),
+  };
+}
+
+function renderEarlyDetection() {
+  const liveCollections = currentLiveCollections();
+  const earlyRows = [...liveCollections.earlyRows].sort((a, b) =>
+    numberOrZero(b.candidate_quality_score) - numberOrZero(a.candidate_quality_score)
+    || numberOrZero(b.candidate_score) - numberOrZero(a.candidate_score));
+  const focusedRows = [...liveCollections.focusedRows].sort((a, b) =>
+    numberOrZero(a.focus_rank || 999) - numberOrZero(b.focus_rank || 999)
+    || numberOrZero(b.candidate_quality_score) - numberOrZero(a.candidate_quality_score));
+  const candidateSummary = parseMaybeJson(state.sessionReport?.summary, {}).candidate_summary || {};
+
+  upsertDetailIndex([...earlyRows, ...focusedRows]);
+
+  el.earlySummaryCards.innerHTML = [
+    {
+      label: "초기 포착 후보",
+      value: String(earlyRows.length),
+      note: "전체 유니버스 탐지층에서 먼저 떠오른 후보 수입니다.",
+    },
+    {
+      label: "집중 감시 종목",
+      value: String(focusedRows.length),
+      note: "websocket 집중 감시 대상으로 승격된 종목 수입니다.",
+    },
+    {
+      label: "후보→신호 전환",
+      value: `${numberOrZero(candidateSummary.candidate_to_signal_conversion_rate).toFixed(1)}%`,
+      note: `평균 ${numberOrZero(candidateSummary.avg_minutes_to_signal).toFixed(1)}분 안에 확정 신호로 이어졌습니다.`,
+    },
+    {
+      label: "품질 상위군 전환",
+      value: `${numberOrZero(candidateSummary.high_quality_conversion_rate).toFixed(1)}%`,
+      note: `false positive ${candidateSummary.false_positive_candidate_count ?? 0}건 / 과열 추격 ${candidateSummary.overextended_candidate_count ?? 0}건`,
+    },
+  ].map((item) => `
+    <article class="list-card">
+      <strong>${escapeHtml(item.label)}</strong>
+      <span>${escapeHtml(item.value)}</span>
+      <p>${escapeHtml(item.note)}</p>
+    </article>
+  `).join("");
+
+  el.focusedSummaryChips.innerHTML = [
+    `전체 유니버스 ${state.status?.total_universe_count ?? state.status?.watchlist_count ?? 0}종목`,
+    `스캔 진행 ${state.status?.broad_scan_processed_count ?? 0}/${state.status?.total_universe_count ?? state.status?.watchlist_count ?? 0}`,
+    `초기 포착 ${earlyRows.length}건`,
+    `확정 신호 ${liveCollections.buyRows.length + liveCollections.sellRows.length}건`,
+    `false positive ${candidateSummary.false_positive_candidate_count ?? 0}건`,
+    `과열 추격 ${numberOrZero(candidateSummary.overextended_candidate_ratio).toFixed(1)}%`,
+  ].map((chip) => `<span class="chip">${escapeHtml(chip)}</span>`).join("");
+
+  if (!earlyRows.length) {
+    el.earlyDetectionList.innerHTML = '<div class="empty">전체 유니버스 탐지층에서 아직 눈에 띄는 초기 포착 후보가 없습니다.</div>';
+  } else {
+    el.earlyDetectionList.innerHTML = earlyRows.map((row) => {
+      const detail = detailFromRow(row);
+      const key = row.candidate_id || row.code;
+      return `
+        <article class="signal-card">
+          <div class="signal-head">
+            <div>
+              <h3>${escapeHtml(row.name)} <span class="muted">${escapeHtml(row.code)}</span></h3>
+              <div class="signal-meta">${escapeHtml(row.market || "-")} / ${escapeHtml(row.sector || "섹터 확인 중")} / ${escapeHtml(row.detection_type || detail.signal_type || "-")}</div>
+            </div>
+            <div class="button-row">
+              <span class="tag info">초기 포착</span>
+              <button class="ghost" data-detail-id="${escapeHtml(key)}" type="button">자세히</button>
+            </div>
+          </div>
+          <p class="signal-summary">${escapeHtml(row.summary || detail.signal_summary || "막 강도가 붙기 시작한 후보입니다.")}</p>
+          <div class="signal-tags">
+            <span class="tag">후보점수 ${numberOrZero(row.candidate_score).toFixed(1)}</span>
+            <span class="tag buy">품질 ${numberOrZero(row.candidate_quality_score ?? detail.candidate_quality_score).toFixed(1)}</span>
+            <span class="tag">${escapeHtml(row.quality_label_text || detail.quality_label_text || "품질 확인 중")}</span>
+            <span class="tag">집중점수 ${numberOrZero(row.focus_score).toFixed(1)}</span>
+            <span class="tag">RVOL ${numberOrZero(detail.rvol).toFixed(2)}</span>
+            <span class="tag">1분 ${formatPct(detail.recent_change_1m_pct)}</span>
+            <span class="tag">${numberOrZero(detail.compare_window_minutes).toFixed(0)}분 ${formatPct(detail.recent_change_pct)}</span>
+            <span class="tag">turnover ${formatRatioPct(detail.turnover_ratio)}</span>
+          </div>
+          <div class="signal-tags">
+            <span class="tag info">${escapeHtml((safeArray(detail.quality_good_reasons)[0]) || "거래 강도와 가격 흐름을 함께 보며 지켜보는 후보입니다.")}</span>
+            ${safeArray(detail.quality_caution_reasons)[0]
+              ? `<span class="tag warn">${escapeHtml(safeArray(detail.quality_caution_reasons)[0])}</span>`
+              : ""}
+            ${numberOrZero(detail.overextension_risk) >= 7
+              ? `<span class="tag danger">과열 추격 주의 ${numberOrZero(detail.overextension_risk).toFixed(1)}</span>`
+              : ""}
+          </div>
+        </article>
+      `;
+    }).join("");
+  }
+
+  if (!focusedRows.length) {
+    el.focusedWatchList.innerHTML = '<div class="empty">지금은 websocket 집중 감시 대상으로 올라온 종목이 없습니다.</div>';
+  } else {
+    el.focusedWatchList.innerHTML = focusedRows.map((row) => {
+      const detail = detailFromRow(row);
+      const key = row.candidate_id || row.code;
+      return `
+        <article class="signal-card">
+          <div class="signal-head">
+            <div>
+              <h3>${escapeHtml(row.name)} <span class="muted">${escapeHtml(row.code)}</span></h3>
+              <div class="signal-meta">${escapeHtml(row.market || "-")} / ${escapeHtml(row.sector || "섹터 확인 중")} / focus rank ${escapeHtml(String(row.focus_rank || "-"))}</div>
+            </div>
+            <div class="button-row">
+              <span class="tag buy">집중 감시</span>
+              <button class="ghost" data-detail-id="${escapeHtml(key)}" type="button">자세히</button>
+            </div>
+          </div>
+          <p class="signal-summary">${escapeHtml(row.summary || detail.signal_summary || "실시간 집중 감시 대상으로 올라온 종목입니다.")}</p>
+          <div class="signal-tags">
+            <span class="tag">품질 ${numberOrZero(row.candidate_quality_score ?? detail.candidate_quality_score).toFixed(1)}</span>
+            <span class="tag">집중점수 ${numberOrZero(row.focus_score).toFixed(1)}</span>
+            <span class="tag">RVOL ${numberOrZero(detail.rvol).toFixed(2)}</span>
+            <span class="tag">${numberOrZero(detail.compare_window_minutes).toFixed(0)}분 ${formatPct(detail.recent_change_pct)}</span>
+            <span class="tag">turnover ${formatRatioPct(detail.turnover_ratio)}</span>
+          </div>
+        </article>
+      `;
+    }).join("");
+  }
+}
+
+function renderStatus() {
+  const status = state.status || {};
+  const sourceInfo = effectiveSourceModeStatus(status);
+  const heartbeatInfo = heartbeatStatus(status);
+  const settingsInfo = settingsReflectionStatus(status);
+  const diagnosticsInfo = diagnosticsStatus(status);
+  const liveFreshness = numberOrZero(status.live_data_freshness_seconds);
+  const regimeLabel = status.current_market_regime_label || status.current_market_regime || "확인 중";
+  const activePresetIsTest = isTestPreset(status.active_preset_name || status.selected_preset_name);
+  const liveCollections = currentLiveCollections();
+
+  el.marketStatusLabel.textContent = status.market_phase_label || status.market_status_label || "확인 중";
+  el.sourceModeLabel.textContent = sourceInfo.label;
+  el.activePresetLabel.textContent = status.active_preset_label || status.selected_preset_label || "확인 중";
+  el.settingsAppliedLabel.textContent = settingsInfo.label;
+  el.heartbeatLabel.textContent = heartbeatInfo.label;
+  el.lastSignalLabel.textContent = formatDateTime(status.last_signal_at);
+  el.statusNotice.textContent = sourceInfo.note || status.notice_text || "실시간 상태를 확인하는 중입니다.";
+
+  const hasQuietMobileNotice = !(
+    diagnosticsInfo.tone === "error"
+    || diagnosticsInfo.tone === "warn"
+    || sourceInfo.tone === "warn"
+    || sourceInfo.tone === "pending"
+    || status.ready_check_status === "fail"
+    || status.ready_check_status === "warn"
+    || Boolean(status.last_error_code || status.last_error_message)
+  );
+  el.statusNotice.classList.toggle("is-quiet", hasQuietMobileNotice);
+
+  const topChips = [
+    { text: `전체 ${status.total_universe_count || status.watchlist_count || 0}종목`, tone: "info" },
+    { text: `후보 ${liveCollections.earlyRows.length}종목`, tone: "pending" },
+    { text: `집중 감시 ${liveCollections.focusedRows.length}종목`, tone: "info" },
+    { text: `live tick ${status.live_tick_count || 0}`, tone: "info" },
+    { text: `freshness ${liveFreshness}초`, tone: sourceInfo.tone },
+    { text: `장세 ${regimeLabel}`, tone: regimeTone(status.current_market_regime) },
+    { text: `매수 ${liveCollections.buyRows.length}건`, tone: "buy" },
+    { text: `매도 ${liveCollections.sellRows.length}건`, tone: "sell" },
+    { text: diagnosticsInfo.label, tone: diagnosticsInfo.tone },
+  ];
+  el.statusChips.innerHTML = topChips
+    .map((item) => `<span class="chip ${escapeHtml(item.tone)}">${escapeHtml(item.text)}</span>`)
+    .join("");
+
+  if (el.mobileStatusFlags) {
+    const mobileFlags = [];
+    if (diagnosticsInfo.tone === "error" || diagnosticsInfo.tone === "warn") {
+      mobileFlags.push({ text: diagnosticsInfo.label, tone: diagnosticsInfo.tone });
+    }
+    if (status.ready_check_status === "fail" || status.ready_check_status === "warn") {
+      mobileFlags.push({
+        text: `ready ${status.ready_check_status}`,
+        tone: status.ready_check_status === "fail" ? "error" : "warn",
+      });
+    }
+    if (status.last_error_code || status.last_error_message) {
+      mobileFlags.push({ text: "오류 있음", tone: "error" });
+    }
+    if (status.tape_recording_enabled === false) {
+      mobileFlags.push({ text: "tape 기록 꺼짐", tone: "warn" });
+    }
+    el.mobileStatusFlags.innerHTML = mobileFlags
+      .slice(0, 3)
+      .map((item) => `<span class="chip ${escapeHtml(item.tone)}">${escapeHtml(item.text)}</span>`)
+      .join("");
+    el.mobileStatusFlags.hidden = mobileFlags.length === 0;
+  }
+
+  if (el.mobileStatusDetailBadge) {
+    const hasStatusIssue = diagnosticsInfo.tone === "error"
+      || diagnosticsInfo.tone === "warn"
+      || status.ready_check_status === "warn"
+      || status.ready_check_status === "fail"
+      || Boolean(status.last_error_code || status.last_error_message);
+    const badgeTone = diagnosticsInfo.tone === "error"
+      ? "error"
+      : diagnosticsInfo.tone === "warn" || status.ready_check_status === "warn"
+        ? "warn"
+        : "info";
+    const badgeText = diagnosticsInfo.tone === "error"
+      ? "오류"
+      : diagnosticsInfo.tone === "warn" || status.ready_check_status === "warn"
+        ? "경고"
+        : "정상";
+    el.mobileStatusDetailBadge.className = `chip ${badgeTone}`;
+    el.mobileStatusDetailBadge.textContent = badgeText;
+    el.mobileStatusDetailBadge.hidden = !hasStatusIssue;
+  }
+
+  const detailCards = [
+    {
+      label: "현재 적용 중인 기준",
+      value: status.active_preset_label || "확인 중",
+      note: activePresetIsTest
+        ? "테스트용 preset 사용 중입니다. 후보와 focused 승격이 넓게 잡혀 false positive가 늘 수 있습니다."
+        : status.active_preset_reason || "현재 시간대와 설정에 맞는 기준을 적용하고 있습니다.",
+    },
+    {
+      label: "오늘의 장세",
+      value: regimeLabel,
+      note: status.regime_summary || "장세를 해석하는 중입니다.",
+    },
+    {
+      label: "실시간 freshness",
+      value: `${status.live_state || "stopped"} / ${liveFreshness}초`,
+      note: `마지막 live tick ${formatDateTime(status.live_last_tick_at)}`,
+    },
+    {
+      label: "설정 반영 상태",
+      value: settingsInfo.label,
+      note: settingsInfo.note,
+    },
+    {
+      label: "최근 설정 변경",
+      value: changedSourceLabel(status.settings_changed_source || state.settingsRow?.changed_source),
+      note: status.settings_change_reason || state.settingsRow?.change_reason || "최근 변경 사유를 아직 받지 못했습니다.",
+    },
+    {
+      label: "마지막 신호",
+      value: formatDateTime(status.last_signal_at),
+      note: `매수 ${formatDateTime(status.last_buy_signal_at)} / 매도 ${formatDateTime(status.last_sell_signal_at)}`,
+    },
+    {
+      label: "장세 추천 preset",
+      value: status.regime_matched_preset_label || "없음",
+      note: status.regime_matched_preset_reason || "장세별 추천 preset을 정리하는 중입니다.",
+    },
+    {
+      label: "ready check",
+      value: status.ready_check_status || "pending",
+      note: (status.ready_check_summary && status.ready_check_summary.summary_line) || "장 시작 전 준비 상태를 점검합니다.",
+    },
+    {
+      label: "tape recording",
+      value: status.tape_recording_enabled ? "on" : "off",
+      note: `session ${status.tape_session_id || "-"} / rows ${status.recorded_tape_row_count || 0} / last ${formatDateTime(status.last_tape_write_time)}`,
+    },
+    {
+      label: "opening window",
+      value: status.opening_window_active ? "active" : "idle",
+      note: `candidate ${status.opening_candidate_count || 0} / signal ${status.opening_signal_count || 0} / false positive ${status.opening_false_positive_count || 0}`,
+    },
+  ];
+  const detailMarkup = detailCards.map((item) => `
+    <article class="status-item">
+      <strong>${escapeHtml(item.label)}</strong>
+      <span>${escapeHtml(item.value || "-")}</span>
+      <p>${escapeHtml(item.note || "")}</p>
+    </article>
+  `).join("");
+  el.statusDetailGrid.innerHTML = detailMarkup;
+  if (el.mobileStatusDetailGrid) el.mobileStatusDetailGrid.innerHTML = detailMarkup;
+
+  const operationsMarkup = [
+    { label: "운영 모드", value: sourceInfo.label, note: sourceInfo.note },
+    { label: "producer heartbeat", value: heartbeatInfo.label, note: heartbeatInfo.note },
+    { label: "상위 섹터 군집", value: status.top_sector_cluster || "확인 중", note: "오늘 장세를 끄는 섹터가 있다면 이 영역에 먼저 나타납니다." },
+    { label: "휩쏘 위험", value: numberOrZero(status.current_whipsaw_risk).toFixed(1), note: "값이 높을수록 흔들림이 커 false positive가 늘기 쉬운 환경입니다." },
+    { label: "추세 지속성", value: numberOrZero(status.current_trend_persistence).toFixed(1), note: "값이 높을수록 장중 흐름이 오후까지 이어지는 편입니다." },
+    { label: "과열 환경", value: numberOrZero(status.current_overextension_environment).toFixed(1), note: "값이 높을수록 늦은 추격형 후보가 늘기 쉬운 환경입니다." },
+    { label: "최근 오류", value: diagnosticsInfo.label, note: diagnosticsInfo.note },
+    { label: "closeout", value: status.session_bundle_available ? "available" : "pending", note: status.closeout_generated_at ? `generated ${formatDateTime(status.closeout_generated_at)}` : "장마감 후 closeout bundle이 생성되면 여기에 표시됩니다." },
+    { label: "monitoring level", value: status.monitoring_level || "normal", note: status.monitoring_level === "monitor" ? "장중 상세 기록 강화 모드입니다." : "일반 운영 기록 모드입니다." },
+  ].map((item) => `
+    <article class="status-item">
+      <strong>${escapeHtml(item.label)}</strong>
+      <span>${escapeHtml(item.value || "-")}</span>
+      <p>${escapeHtml(item.note || "")}</p>
+    </article>
+  `).join("");
+  el.operationsGrid.innerHTML = operationsMarkup;
+  if (el.mobileOperationsGrid) el.mobileOperationsGrid.innerHTML = operationsMarkup;
+
+  const regimeReasons = safeArray(status.market_regime_reasons);
+  const notes = [...safeArray(status.runtime_notes), ...regimeReasons, ...Array.from(state.setupNotes)];
+  const notesMarkup = notes.length
+    ? notes.map((note) => {
+      const text = String(note || "");
+      const tone = text.includes("오류")
+        ? "error"
+        : text.includes("fallback") || text.includes("없") || text.includes("대기")
+          ? "warn"
+          : "";
+      return `<div class="note-item ${tone}">${escapeHtml(text)}</div>`;
+    }).join("")
+    : `<div class="empty">운영 메모가 아직 없습니다.</div>`;
+  el.runtimeNotes.innerHTML = notesMarkup;
+  if (el.mobileRuntimeNotes) el.mobileRuntimeNotes.innerHTML = notesMarkup;
+
+  renderDiagnosticList(
+    el.diagnosticList,
+    state.diagnosticsRows,
+    "최근 진단 기록이 아직 없습니다.",
+    (row) => `
+      <article class="diagnostic-item ${escapeHtml(String(row.severity || "info").toLowerCase())}">
+        <strong>
+          <span>${escapeHtml(row.kind || "diagnostic")}</span>
+          <span>${escapeHtml(formatDateTime(row.created_at))}</span>
+        </strong>
+        ${diagnosticMessageMarkup(row)}
+      </article>
+    `,
+  );
+
+  renderDiagnosticList(
+    el.validationList,
+    state.validationRows,
+    "운영 검증 기록이 아직 없습니다.",
+    (row) => `
+      <article class="diagnostic-item info">
+        <strong>
+          <span>${escapeHtml(row.event_type || "validation")}</span>
+          <span>${escapeHtml(formatDateTime(row.created_at || row.event_time))}</span>
+        </strong>
+        <p>${escapeHtml(`${row.name || row.code || "대상 없음"} / ${row.signal_type || "신호 없음"} / ${row.preset_name || "preset 없음"}`)}</p>
+      </article>
+    `,
+  );
+
+  if (el.mobileDiagnosticList) {
+    el.mobileDiagnosticList.innerHTML = el.diagnosticList?.innerHTML || "";
+  }
+  if (el.mobileValidationList) {
+    el.mobileValidationList.innerHTML = el.validationList?.innerHTML || "";
+  }
+}
+
+function renderMobilePrioritySummary() {
+  if (!el.mobileStatusSummary) return;
+  const status = state.status || {};
+  const sourceInfo = effectiveSourceModeStatus(status);
+  const settingsInfo = settingsReflectionStatus(status);
+  const diagnosticsInfo = diagnosticsStatus(status);
+  const activePresetName = status.active_preset_name || status.selected_preset_name;
+  const activePresetLabel = status.active_preset_label || status.selected_preset_label || "확인 중";
+  const compactCards = [
+    {
+      label: "시장 상태",
+      value: status.market_phase_label || status.market_status_label || "확인 중",
+      note: status.current_market_regime_label || status.current_market_regime || "장세 해석 대기 중",
+    },
+    {
+      label: "현재 반영 모드",
+      value: sourceInfo.label || "확인 중",
+      note: sourceInfo.note || "실시간 데이터 반영 상태를 보여줍니다.",
+    },
+    {
+      label: "활성 preset",
+      value: activePresetLabel,
+      note: isTestPreset(activePresetName)
+        ? "테스트용 preset이라 후보와 focused 승격이 넓게 잡힐 수 있습니다."
+        : status.active_preset_reason || "현재 시간대와 장세를 반영한 preset입니다.",
+    },
+    {
+      label: "설정 반영 상태",
+      value: settingsInfo.label || "확인 중",
+      note: settingsInfo.note || "현재 적용 중인 설정 반영 상태를 보여줍니다.",
+    },
+    {
+      label: "경고 여부",
+      value: diagnosticsInfo.label || "확인 중",
+      note: diagnosticsInfo.note || "운영상 먼저 확인해야 할 경고 상태를 보여줍니다.",
+    },
+  ];
+  el.mobileStatusSummary.innerHTML = compactCards.map((item) => `
+    <article class="status-item mobile-status-item">
+      <strong>${escapeHtml(item.label)}</strong>
+      <span>${escapeHtml(item.value || "-")}</span>
+      <p>${escapeHtml(item.note || "")}</p>
+    </article>
+  `).join("");
 }
 
 let dashboardBootstrapped = false;
