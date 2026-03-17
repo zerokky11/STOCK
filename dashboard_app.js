@@ -5758,14 +5758,476 @@ function renderStatus() {
   }
 }
 
+const STATUS_ROW_STALE_SECONDS = 75;
+const PARTIAL_LIVE_TICK_SECONDS = 75;
+const PARTIAL_LIVE_HEARTBEAT_SECONDS = 60;
+
+function formatElapsedLabel(totalSeconds) {
+  const seconds = Math.max(0, numberOrZero(totalSeconds));
+  if (seconds < 60) return `${seconds}초`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}분`;
+  const hours = Math.floor(minutes / 60);
+  const remainMinutes = minutes % 60;
+  return remainMinutes ? `${hours}시간 ${remainMinutes}분` : `${hours}시간`;
+}
+
+function statusRowAgeSeconds(status) {
+  return secondsSince(
+    status.app_status_last_success_at
+    || status.updated_at
+    || status.generated_at
+    || ""
+  );
+}
+
+function statusSyncDelayInfo(status) {
+  const syncState = String(status.app_status_sync_state || "").toLowerCase();
+  const rowAge = statusRowAgeSeconds(status);
+  const marketOpen = Boolean(status.market_open);
+  const lastSuccessAt = status.app_status_last_success_at || status.updated_at || status.generated_at || "";
+  const lastFailureAt = status.app_status_last_failure_at || "";
+  const hasExplicitFailure = syncState && syncState !== "ok";
+  const staleBecauseOldRow = marketOpen && rowAge > STATUS_ROW_STALE_SECONDS;
+  if (!hasExplicitFailure && !staleBecauseOldRow) {
+    return { active: false, tone: "ok", label: "", note: "", detail: "" };
+  }
+  const lastKnownAge = formatElapsedLabel(rowAge);
+  const short = status.app_status_sync_short_message || "최근 상태 반영이 지연될 수 있습니다.";
+  return {
+    active: true,
+    tone: hasExplicitFailure ? "warn" : "pending",
+    label: "운영 상태 동기화 지연",
+    note: `최근 live 상태를 확인하지 못했습니다. 마지막 정상 상태는 ${lastKnownAge} 전 값입니다.`,
+    detail: [
+      short,
+      lastSuccessAt ? `마지막 정상 반영 ${formatDateTime(lastSuccessAt)}` : "",
+      lastFailureAt ? `마지막 실패 ${formatDateTime(lastFailureAt)}` : "",
+    ].filter(Boolean).join(" / "),
+  };
+}
+
+function readyCheckDisplay(status) {
+  const syncInfo = statusSyncDelayInfo(status);
+  const raw = String(status.ready_check_status || "").trim().toLowerCase();
+  const generatedAt = status.ready_check_generated_at || status.ready_check_summary?.generated_at || "";
+  if (!raw || raw === "pending") {
+    return generatedAt
+      ? { label: "대기", tone: "pending", note: "최근 ready check 결과를 다시 기다리는 중입니다." }
+      : { label: "미실행", tone: "info", note: "아직 ready check를 실행하지 않았습니다." };
+  }
+  if (syncInfo.active) {
+    return {
+      label: "stale",
+      tone: "warn",
+      note: "ready check는 수행됐지만 운영 상태 동기화가 지연돼 최신 반영 여부를 다시 확인해야 합니다.",
+    };
+  }
+  if (raw === "ready" || raw === "ok") return { label: "ready", tone: "ok", note: "최근 ready check가 정상적으로 끝났습니다." };
+  if (raw === "warn") return { label: "warn", tone: "warn", note: "ready check 경고 항목이 있어 운영 상태를 같이 보는 편이 좋습니다." };
+  if (raw === "fail") return { label: "fail", tone: "error", note: "ready check 실패 항목이 있어 재점검이 필요합니다." };
+  if (raw === "stale") return { label: "stale", tone: "warn", note: "ready check 결과가 최신 운영 상태를 충분히 반영하지 못하고 있습니다." };
+  return { label: raw, tone: "info", note: "ready check 상태를 확인하는 중입니다." };
+}
+
+function presetStatusSummary(status) {
+  const manualName = status.selected_preset_name || state.settingsRow?.selected_preset_name || "";
+  const manualLabel = status.selected_preset_label || state.settingsRow?.selected_preset_label || manualName || "사용자 설정";
+  const effectiveName = status.active_preset_name || manualName || "";
+  const effectiveLabel = status.active_preset_label || manualLabel || "확인 중";
+  const autoEnabled = Boolean(status.auto_preset_enabled ?? state.settingsRow?.auto_preset_enabled);
+  const overrideActive = autoEnabled && manualName && effectiveName && manualName !== effectiveName;
+  return {
+    manualName,
+    manualLabel,
+    effectiveName,
+    effectiveLabel,
+    autoEnabled,
+    overrideActive,
+  };
+}
+
+function hasUsablePartialLiveEvidence(status, collections) {
+  const liveState = String(status.live_state || "").toLowerCase();
+  const freshness = numberOrZero(status.live_data_freshness_seconds);
+  const lastTickFresh = Boolean(status.live_last_tick_at) && freshness > 0 && freshness <= PARTIAL_LIVE_TICK_SECONDS;
+  const heartbeatFresh = secondsSince(status.producer_heartbeat_at || status.updated_at || "") <= PARTIAL_LIVE_HEARTBEAT_SECONDS;
+  const tapeEnabled = Boolean(status.tape_recording_enabled);
+  const focusedFresh = collections.focusedRows.length > 0;
+  return lastTickFresh && tapeEnabled && heartbeatFresh && focusedFresh && (liveState === "ok" || liveState === "delayed");
+}
+
+function currentLiveCollections() {
+  const buyRows = (state.buySignals || []).filter(isFreshRealtimeRowStrict);
+  const sellRows = (state.sellSignals || []).filter(isFreshRealtimeRowStrict);
+  const earlyRows = (state.earlyDetectionRows || []).filter(isFreshRealtimeRowStrict);
+  const focusedRows = (state.focusedRows || []).filter(isFreshRealtimeRowStrict);
+  const liveRowCount = buyRows.length + sellRows.length + earlyRows.length + focusedRows.length;
+  const status = state.status || {};
+  const marketOpen = Boolean(status.market_open);
+  const syncInfo = statusSyncDelayInfo(status);
+  const liveHealthy = hasUsableLiveStatus(status);
+  const partialEvidence = hasUsablePartialLiveEvidence(status, { buyRows, sellRows, earlyRows, focusedRows });
+  const recoveringEvidence = marketOpen && (
+    liveRowCount > 0
+    || Boolean(status.live_last_tick_at)
+    || secondsSince(status.producer_heartbeat_at || status.updated_at || "") <= PARTIAL_LIVE_HEARTBEAT_SECONDS
+  );
+  let effectiveMode = status.dashboard_source_mode || (marketOpen ? "fallback" : "last_market");
+  if (syncInfo.active) {
+    effectiveMode = marketOpen ? "recovering" : "last_market";
+  } else if (!marketOpen) {
+    effectiveMode = "last_market";
+  } else if (liveHealthy && Boolean(status.live_last_tick_at) && numberOrZero(status.live_data_freshness_seconds) <= 45) {
+    effectiveMode = "live";
+  } else if (partialEvidence) {
+    effectiveMode = "partial_live";
+  } else if (recoveringEvidence) {
+    effectiveMode = "recovering";
+  } else {
+    effectiveMode = "fallback";
+  }
+  return { buyRows, sellRows, earlyRows, focusedRows, liveRowCount, liveHealthy, effectiveMode, syncInfo };
+}
+
+function effectiveSourceModeStatus(status) {
+  const collections = currentLiveCollections();
+  if (collections.syncInfo.active) {
+    return {
+      label: "동기화 지연",
+      tone: collections.syncInfo.tone,
+      note: collections.syncInfo.note,
+      detail: collections.syncInfo.detail,
+    };
+  }
+  const mode = collections.effectiveMode || status.dashboard_source_mode || "last_market";
+  const liveState = String(status.live_state || "stopped").toLowerCase();
+  if (mode === "live" && liveState === "ok") {
+    return { label: "live 정상", tone: "ok", note: "실시간 데이터가 정상적으로 들어오고 있습니다." };
+  }
+  if (mode === "live" && liveState === "delayed") {
+    return { label: "live 지연", tone: "pending", note: "최근 틱 수신이 조금 늦지만 실시간 흐름은 유지되고 있습니다." };
+  }
+  if (mode === "partial_live") {
+    return { label: "partial live", tone: "pending", note: "실시간 focused 흐름이 아직 유효해 후보와 신호 일부를 함께 보여주고 있습니다." };
+  }
+  if (mode === "recovering") {
+    return { label: "recovering", tone: "warn", note: "최근 live 상태를 완전히 확인하지 못해 복구 중으로 보고 있습니다." };
+  }
+  if (mode === "fallback") {
+    return { label: "snapshot fallback", tone: "warn", note: status.fallback_reason || "현재는 마지막 시장 기준 데이터를 보여주고 있습니다." };
+  }
+  if (mode === "last_market") {
+    return { label: "last_market", tone: "info", note: "현재는 마지막 시장 기준 데이터를 보여주고 있습니다." };
+  }
+  return { label: "확인 중", tone: "info", note: "실시간 상태를 확인하는 중입니다." };
+}
+
+function settingsReflectionStatus(status) {
+  const savedAt = status.last_settings_save_at || state.settingsRow?.updated_at || "";
+  const appliedAt = status.signal_settings_applied_at || "";
+  const presetInfo = presetStatusSummary(status);
+  if (state.settingsFetchState?.status === "stale-keep") {
+    return {
+      label: "마지막 성공 상태 유지",
+      tone: "warn",
+      note: state.settingsFetchState.note || "설정 읽기 실패로 마지막 성공 상태를 유지합니다.",
+    };
+  }
+  if (!savedAt) {
+    return { label: "확인 중", tone: "info", note: "아직 저장된 설정 시각을 받지 못했습니다." };
+  }
+  if (!appliedAt) {
+    return { label: "반영 대기", tone: "pending", note: `저장 ${formatDateTime(savedAt)} / 러너가 새 기준을 다시 읽는 중입니다.` };
+  }
+  const savedMs = new Date(savedAt).getTime();
+  const appliedMs = new Date(appliedAt).getTime();
+  if (!Number.isNaN(savedMs) && !Number.isNaN(appliedMs) && appliedMs >= savedMs - 1000) {
+    if (presetInfo.overrideActive) {
+      return {
+        label: "자동추천 override 적용 중",
+        tone: "ok",
+        note: `수동 저장값 ${presetInfo.manualLabel} / 현재 적용 ${presetInfo.effectiveLabel} / 적용 ${formatDateTime(appliedAt)}`,
+      };
+    }
+    return {
+      label: presetInfo.autoEnabled ? "자동추천 반영 완료" : "수동 설정 유지 중",
+      tone: "ok",
+      note: presetInfo.autoEnabled
+        ? `현재 적용 ${presetInfo.effectiveLabel} / 적용 ${formatDateTime(appliedAt)}`
+        : `수동 저장값 ${presetInfo.manualLabel} / 적용 ${formatDateTime(appliedAt)}`,
+    };
+  }
+  return { label: "반영 대기", tone: "pending", note: `저장 ${formatDateTime(savedAt)} / 마지막 적용 ${formatDateTime(appliedAt)}` };
+}
+
+function diagnosticsStatus(status) {
+  const syncInfo = statusSyncDelayInfo(status);
+  if (syncInfo.active) {
+    return {
+      label: "운영 상태 동기화 지연",
+      tone: syncInfo.tone,
+      note: syncInfo.note,
+      detail: syncInfo.detail,
+    };
+  }
+  if (!status.settings_table_available) {
+    return { label: "signal_settings 미구성", tone: "warn", note: "signal_settings 테이블이 아직 없어 기본 설정으로 동작 중입니다." };
+  }
+  if (!status.presets_table_available) {
+    return { label: "preset fallback 사용 중", tone: "warn", note: "signal_presets가 없어 내장 추천값을 사용 중입니다." };
+  }
+  if (status.last_error_message) {
+    const errorInfo = summarizeErrorMessage(status.last_error_message, status.last_error_code);
+    return {
+      label: errorInfo.label || "최근 오류 있음",
+      tone: "error",
+      note: errorInfo.short,
+      detail: errorInfo.detail,
+    };
+  }
+  return { label: "최근 오류 없음", tone: "ok", note: "최근 진단 항목에서 치명적인 오류를 받지 않았습니다." };
+}
+
+function renderStatus() {
+  const status = state.status || {};
+  const sourceInfo = effectiveSourceModeStatus(status);
+  const heartbeatInfo = heartbeatStatus(status);
+  const settingsInfo = settingsReflectionStatus(status);
+  const diagnosticsInfo = diagnosticsStatus(status);
+  const readyInfo = readyCheckDisplay(status);
+  const presetInfo = presetStatusSummary(status);
+  const liveFreshness = numberOrZero(status.live_data_freshness_seconds);
+  const regimeLabel = status.current_market_regime_label || status.current_market_regime || "확인 중";
+  const liveCollections = currentLiveCollections();
+  const syncInfo = liveCollections.syncInfo;
+
+  el.marketStatusLabel.textContent = status.market_phase_label || status.market_status_label || "확인 중";
+  el.sourceModeLabel.textContent = sourceInfo.label;
+  el.activePresetLabel.textContent = presetInfo.effectiveLabel || "확인 중";
+  el.settingsAppliedLabel.textContent = settingsInfo.label;
+  el.heartbeatLabel.textContent = heartbeatInfo.label;
+  el.lastSignalLabel.textContent = formatDateTime(status.last_signal_at);
+  el.statusNotice.textContent = sourceInfo.note || status.notice_text || "실시간 상태를 확인하는 중입니다.";
+
+  const hasQuietMobileNotice = !(
+    diagnosticsInfo.tone === "error"
+    || diagnosticsInfo.tone === "warn"
+    || sourceInfo.tone === "warn"
+    || sourceInfo.tone === "pending"
+    || readyInfo.tone === "warn"
+    || readyInfo.tone === "error"
+  );
+  el.statusNotice.classList.toggle("is-quiet", hasQuietMobileNotice);
+
+  const topChips = [
+    { text: `전체 ${status.total_universe_count || status.watchlist_count || 0}종목`, tone: "info" },
+    { text: `후보 ${liveCollections.earlyRows.length}종목`, tone: "pending" },
+    { text: `집중 감시 ${liveCollections.focusedRows.length}종목`, tone: "info" },
+    { text: `매수 ${liveCollections.buyRows.length}건`, tone: "buy" },
+    { text: `매도 ${liveCollections.sellRows.length}건`, tone: "sell" },
+    { text: diagnosticsInfo.label, tone: diagnosticsInfo.tone },
+  ];
+  el.statusChips.innerHTML = topChips
+    .map((item) => `<span class="chip ${escapeHtml(item.tone)}">${escapeHtml(item.text)}</span>`)
+    .join("");
+
+  if (el.mobileStatusFlags) {
+    const mobileFlags = [];
+    if (diagnosticsInfo.tone === "error" || diagnosticsInfo.tone === "warn") {
+      mobileFlags.push({ text: diagnosticsInfo.label, tone: diagnosticsInfo.tone });
+    }
+    if (readyInfo.tone === "warn" || readyInfo.tone === "error") {
+      mobileFlags.push({ text: `ready ${readyInfo.label}`, tone: readyInfo.tone });
+    }
+    if (status.last_error_code || status.last_error_message) {
+      mobileFlags.push({ text: "오류 있음", tone: "error" });
+    }
+    if (status.tape_recording_enabled === false) {
+      mobileFlags.push({ text: "tape 기록 꺼짐", tone: "warn" });
+    }
+    el.mobileStatusFlags.innerHTML = mobileFlags
+      .slice(0, 3)
+      .map((item) => `<span class="chip ${escapeHtml(item.tone)}">${escapeHtml(item.text)}</span>`)
+      .join("");
+    el.mobileStatusFlags.hidden = mobileFlags.length === 0;
+  }
+
+  if (el.mobileStatusDetailBadge) {
+    const hasStatusIssue = diagnosticsInfo.tone === "error"
+      || diagnosticsInfo.tone === "warn"
+      || readyInfo.tone === "warn"
+      || readyInfo.tone === "error";
+    const badgeTone = diagnosticsInfo.tone === "error" || readyInfo.tone === "error"
+      ? "error"
+      : hasStatusIssue
+        ? "warn"
+        : "info";
+    const badgeText = diagnosticsInfo.tone === "error" || readyInfo.tone === "error"
+      ? "오류"
+      : hasStatusIssue
+        ? "경고"
+        : "정상";
+    el.mobileStatusDetailBadge.className = `chip ${badgeTone}`;
+    el.mobileStatusDetailBadge.textContent = badgeText;
+    el.mobileStatusDetailBadge.hidden = !hasStatusIssue;
+  }
+
+  const detailCards = [
+    {
+      label: "현재 적용 중인 기준",
+      value: presetInfo.effectiveLabel || "확인 중",
+      note: presetInfo.overrideActive
+        ? `수동 저장값 ${presetInfo.manualLabel} / 자동추천 적용값 ${presetInfo.effectiveLabel}`
+        : status.active_preset_reason || "현재 운영 중인 기준을 보여줍니다.",
+    },
+    {
+      label: "마지막 수동 저장값",
+      value: presetInfo.manualLabel || "사용자 설정",
+      note: `${status.auto_preset_enabled ? "자동추천 사용" : "수동 설정 유지"} / 저장 ${formatDateTime(status.last_settings_save_at || state.settingsRow?.updated_at)}`,
+    },
+    {
+      label: "설정 반영 상태",
+      value: settingsInfo.label,
+      note: settingsInfo.note,
+    },
+    {
+      label: "실시간 freshness",
+      value: `${status.live_state || "stopped"} / ${liveFreshness}초`,
+      note: `마지막 live tick ${formatDateTime(status.live_last_tick_at)}`,
+    },
+    {
+      label: "오늘 장세",
+      value: regimeLabel,
+      note: status.regime_summary || "장세를 해석하는 중입니다.",
+    },
+    {
+      label: "최근 설정 변경",
+      value: changedSourceLabel(status.settings_changed_source || state.settingsRow?.changed_source),
+      note: status.settings_change_reason || state.settingsRow?.change_reason || "최근 변경 사유를 아직 받지 못했습니다.",
+    },
+    {
+      label: "ready check",
+      value: readyInfo.label,
+      note: readyInfo.note,
+    },
+    {
+      label: "tape recording",
+      value: status.tape_recording_enabled ? "on" : "off",
+      note: `session ${status.tape_session_id || "-"} / rows ${status.recorded_tape_row_count || 0} / last ${formatDateTime(status.last_tape_write_time)}`,
+    },
+  ];
+  const detailMarkup = detailCards.map((item) => `
+    <article class="status-item">
+      <strong>${escapeHtml(item.label)}</strong>
+      <span>${escapeHtml(item.value || "-")}</span>
+      <p>${escapeHtml(item.note || "")}</p>
+    </article>
+  `).join("");
+  el.statusDetailGrid.innerHTML = detailMarkup;
+  if (el.mobileStatusDetailGrid) el.mobileStatusDetailGrid.innerHTML = detailMarkup;
+
+  const operationsMarkup = [
+    { label: "운영 모드", value: sourceInfo.label, note: sourceInfo.note },
+    { label: "producer heartbeat", value: heartbeatInfo.label, note: heartbeatInfo.note },
+    {
+      label: "상태 동기화",
+      value: syncInfo.active ? "지연" : "정상",
+      note: syncInfo.active
+        ? syncInfo.detail || syncInfo.note
+        : `마지막 정상 반영 ${formatDateTime(status.app_status_last_success_at || status.updated_at)}`,
+    },
+    {
+      label: "ready check",
+      value: readyInfo.label,
+      note: readyInfo.note,
+    },
+    {
+      label: "broad scan quote",
+      value: `${numberOrZero(status.broad_scan_quote_failure_ratio).toFixed(1)}% 실패`,
+      note: `성공 ${numberOrZero(status.broad_scan_quote_success_count).toFixed(0)} / 실패 ${numberOrZero(status.broad_scan_quote_failure_count).toFixed(0)}`,
+    },
+    {
+      label: "최근 오류",
+      value: diagnosticsInfo.label,
+      note: diagnosticsInfo.note,
+    },
+    {
+      label: "monitoring level",
+      value: status.monitoring_level || "normal",
+      note: status.monitoring_level === "monitor" ? "장중 상세 기록 강화 모드입니다." : "일반 운영 기록 모드입니다.",
+    },
+  ].map((item) => `
+    <article class="status-item">
+      <strong>${escapeHtml(item.label)}</strong>
+      <span>${escapeHtml(item.value || "-")}</span>
+      <p>${escapeHtml(item.note || "")}</p>
+    </article>
+  `).join("");
+  el.operationsGrid.innerHTML = operationsMarkup;
+  if (el.mobileOperationsGrid) el.mobileOperationsGrid.innerHTML = operationsMarkup;
+
+  const regimeReasons = safeArray(status.market_regime_reasons);
+  const notes = [...safeArray(status.runtime_notes), ...regimeReasons, ...Array.from(state.setupNotes)];
+  const notesMarkup = notes.length
+    ? notes.map((note) => {
+      const text = String(note || "");
+      const tone = text.includes("오류")
+        ? "error"
+        : text.includes("fallback") || text.includes("지연") || text.includes("대기")
+          ? "warn"
+          : "";
+      return `<div class="note-item ${tone}">${escapeHtml(text)}</div>`;
+    }).join("")
+    : `<div class="empty">운영 메모가 아직 없습니다.</div>`;
+  el.runtimeNotes.innerHTML = notesMarkup;
+  if (el.mobileRuntimeNotes) el.mobileRuntimeNotes.innerHTML = notesMarkup;
+
+  renderDiagnosticList(
+    el.diagnosticList,
+    state.diagnosticsRows,
+    "최근 진단 기록이 아직 없습니다.",
+    (row) => `
+      <article class="diagnostic-item ${escapeHtml(String(row.severity || "info").toLowerCase())}">
+        <strong>
+          <span>${escapeHtml(row.kind || "diagnostic")}</span>
+          <span>${escapeHtml(formatDateTime(row.created_at))}</span>
+        </strong>
+        ${diagnosticMessageMarkup(row)}
+      </article>
+    `,
+  );
+
+  renderDiagnosticList(
+    el.validationList,
+    state.validationRows,
+    "운영 검증 기록이 아직 없습니다.",
+    (row) => `
+      <article class="diagnostic-item info">
+        <strong>
+          <span>${escapeHtml(row.event_type || "validation")}</span>
+          <span>${escapeHtml(formatDateTime(row.created_at || row.event_time))}</span>
+        </strong>
+        <p>${escapeHtml(`${row.name || row.code || "대상 없음"} / ${row.signal_type || "신호 없음"} / ${row.preset_name || "preset 없음"}`)}</p>
+      </article>
+    `,
+  );
+
+  if (el.mobileDiagnosticList) {
+    el.mobileDiagnosticList.innerHTML = el.diagnosticList?.innerHTML || "";
+  }
+  if (el.mobileValidationList) {
+    el.mobileValidationList.innerHTML = el.validationList?.innerHTML || "";
+  }
+}
+
 function renderMobilePrioritySummary() {
   if (!el.mobileStatusSummary) return;
   const status = state.status || {};
   const sourceInfo = effectiveSourceModeStatus(status);
   const settingsInfo = settingsReflectionStatus(status);
   const diagnosticsInfo = diagnosticsStatus(status);
-  const activePresetName = status.active_preset_name || status.selected_preset_name;
-  const activePresetLabel = status.active_preset_label || status.selected_preset_label || "확인 중";
+  const presetInfo = presetStatusSummary(status);
   const compactCards = [
     {
       label: "시장 상태",
@@ -5779,9 +6241,9 @@ function renderMobilePrioritySummary() {
     },
     {
       label: "활성 preset",
-      value: activePresetLabel,
-      note: isTestPreset(activePresetName)
-        ? "테스트용 preset이라 후보와 focused 승격이 넓게 잡힐 수 있습니다."
+      value: presetInfo.effectiveLabel || "확인 중",
+      note: presetInfo.overrideActive
+        ? `수동 저장값 ${presetInfo.manualLabel} / 자동추천 적용값 ${presetInfo.effectiveLabel}`
         : status.active_preset_reason || "현재 시간대와 장세를 반영한 preset입니다.",
     },
     {
