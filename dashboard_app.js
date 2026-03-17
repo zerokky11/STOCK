@@ -5787,20 +5787,20 @@ function statusSyncDelayInfo(status) {
   const marketOpen = Boolean(status.market_open);
   const lastSuccessAt = status.app_status_last_success_at || status.updated_at || status.generated_at || "";
   const lastFailureAt = status.app_status_last_failure_at || "";
+  const syncErrorInfo = summarizeErrorMessage(status.app_status_sync_short_message, status.app_status_sync_error_type);
   const hasExplicitFailure = syncState && syncState !== "ok";
   const staleBecauseOldRow = marketOpen && rowAge > STATUS_ROW_STALE_SECONDS;
   if (!hasExplicitFailure && !staleBecauseOldRow) {
     return { active: false, tone: "ok", label: "", note: "", detail: "" };
   }
   const lastKnownAge = formatElapsedLabel(rowAge);
-  const short = status.app_status_sync_short_message || "최근 상태 반영이 지연될 수 있습니다.";
   return {
     active: true,
     tone: hasExplicitFailure ? "warn" : "pending",
     label: "운영 상태 동기화 지연",
     note: `최근 live 상태를 확인하지 못했습니다. 마지막 정상 상태는 ${lastKnownAge} 전 값입니다.`,
     detail: [
-      short,
+      syncErrorInfo.short || "최근 상태 반영이 지연될 수 있습니다.",
       lastSuccessAt ? `마지막 정상 반영 ${formatDateTime(lastSuccessAt)}` : "",
       lastFailureAt ? `마지막 실패 ${formatDateTime(lastFailureAt)}` : "",
     ].filter(Boolean).join(" / "),
@@ -5983,7 +5983,7 @@ function diagnosticsStatus(status) {
       label: errorInfo.label || "최근 오류 있음",
       tone: "error",
       note: errorInfo.short,
-      detail: errorInfo.detail,
+      detail: errorInfo.detail && errorInfo.detail !== errorInfo.short ? errorInfo.detail : "",
     };
   }
   return { label: "최근 오류 없음", tone: "ok", note: "최근 진단 항목에서 치명적인 오류를 받지 않았습니다." };
