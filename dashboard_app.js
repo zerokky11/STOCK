@@ -6266,6 +6266,114 @@ function renderMobilePrioritySummary() {
   `).join("");
 }
 
+function hasExtendedStatusSchema(status) {
+  if (!status || typeof status !== "object") return false;
+  const requiredKeys = [
+    "app_status_sync_state",
+    "ready_check_status",
+    "tape_recording_enabled",
+    "health_guard_state",
+    "monitoring_level",
+    "session_review_available",
+  ];
+  return requiredKeys.every((key) => Object.prototype.hasOwnProperty.call(status, key));
+}
+
+function statusSyncDelayInfo(status) {
+  if (!hasExtendedStatusSchema(status)) {
+    return { active: false, tone: "info", label: "", note: "", detail: "" };
+  }
+  const syncState = String(status.app_status_sync_state || "").toLowerCase();
+  const rowAge = statusRowAgeSeconds(status);
+  const marketOpen = Boolean(status.market_open);
+  const lastSuccessAt = status.app_status_last_success_at || status.updated_at || status.generated_at || "";
+  const lastFailureAt = status.app_status_last_failure_at || "";
+  const syncErrorInfo = summarizeErrorMessage(status.app_status_sync_short_message, status.app_status_sync_error_type);
+  const hasExplicitFailure = syncState && syncState !== "ok";
+  const staleBecauseOldRow = marketOpen && rowAge > STATUS_ROW_STALE_SECONDS;
+  if (!hasExplicitFailure && !staleBecauseOldRow) {
+    return { active: false, tone: "ok", label: "", note: "", detail: "" };
+  }
+  const lastKnownAge = formatElapsedLabel(rowAge);
+  return {
+    active: true,
+    tone: hasExplicitFailure ? "warn" : "pending",
+    label: "운영 상태 동기화 지연",
+    note: `최근 live 상태를 확인하지 못했습니다. 마지막 정상 상태는 ${lastKnownAge} 전 값입니다.`,
+    detail: [
+      syncErrorInfo.short || "최근 상태 반영이 지연되고 있습니다.",
+      lastSuccessAt ? `마지막 정상 반영 ${formatDateTime(lastSuccessAt)}` : "",
+      lastFailureAt ? `마지막 실패 ${formatDateTime(lastFailureAt)}` : "",
+    ].filter(Boolean).join(" / "),
+  };
+}
+
+function readyCheckDisplay(status) {
+  if (!hasExtendedStatusSchema(status)) {
+    return {
+      label: "미구성",
+      tone: "warn",
+      note: "app_status 확장 컬럼이 아직 반영되지 않아 ready check 상세를 공개 화면에 모두 표시하지 못하고 있습니다.",
+    };
+  }
+  const syncInfo = statusSyncDelayInfo(status);
+  const raw = String(status.ready_check_status || "").trim().toLowerCase();
+  const generatedAt = status.ready_check_generated_at || status.ready_check_summary?.generated_at || "";
+  if (!raw || raw === "pending" || raw === "not_run") {
+    return generatedAt
+      ? { label: "대기", tone: "pending", note: "최근 ready check 결과를 다시 확인하는 중입니다." }
+      : { label: "미실행", tone: "info", note: "아직 ready check를 실행하지 않았습니다." };
+  }
+  if (syncInfo.active) {
+    return {
+      label: "stale",
+      tone: "warn",
+      note: "ready check는 실행됐지만 운영 상태 동기화가 지연되어 최신 반영 여부를 다시 확인해야 합니다.",
+    };
+  }
+  if (raw === "ready" || raw === "ok") return { label: "ready", tone: "ok", note: "최근 ready check가 정상적으로 끝났습니다." };
+  if (raw === "warn") return { label: "warn", tone: "warn", note: "ready check 경고 항목이 있어 운영 상태를 함께 보는 편이 좋습니다." };
+  if (raw === "fail") return { label: "fail", tone: "error", note: "ready check 실패 항목이 있어 사전 점검이 필요합니다." };
+  if (raw === "stale") return { label: "stale", tone: "warn", note: "ready check 결과가 오래되어 현재 운영 상태를 충분히 반영하지 못하고 있습니다." };
+  return { label: raw, tone: "info", note: "ready check 상태를 확인하는 중입니다." };
+}
+
+function diagnosticsStatus(status) {
+  const syncInfo = statusSyncDelayInfo(status);
+  if (syncInfo.active) {
+    return {
+      label: "운영 상태 동기화 지연",
+      tone: syncInfo.tone,
+      note: syncInfo.note,
+      detail: syncInfo.detail,
+    };
+  }
+  if (!hasExtendedStatusSchema(status)) {
+    return {
+      label: "운영 상태 컬럼 미반영",
+      tone: "warn",
+      note: "app_status SQL 최신본이 아직 반영되지 않아 일부 운영 진단 값은 기본 상태만 보여줍니다.",
+      detail: "supabase_shared_dashboard.sql의 app_status 확장 컬럼을 다시 적용하면 더 정확한 운영 상태를 볼 수 있습니다.",
+    };
+  }
+  if (!status.settings_table_available) {
+    return { label: "signal_settings 미구성", tone: "warn", note: "signal_settings 테이블이 아직 없어 기본 설정으로 동작 중입니다." };
+  }
+  if (!status.presets_table_available) {
+    return { label: "preset fallback 사용 중", tone: "warn", note: "signal_presets가 없어 기본 추천값을 사용 중입니다." };
+  }
+  if (status.last_error_message) {
+    const errorInfo = summarizeErrorMessage(status.last_error_message, status.last_error_code);
+    return {
+      label: errorInfo.label || "최근 오류 있음",
+      tone: "error",
+      note: errorInfo.short,
+      detail: errorInfo.detail && errorInfo.detail !== errorInfo.short ? errorInfo.detail : "",
+    };
+  }
+  return { label: "최근 오류 없음", tone: "ok", note: "최근 진단 항목에서 치명적인 오류를 받지 않았습니다." };
+}
+
 let dashboardBootstrapped = false;
 
 function bootstrapDashboard() {
