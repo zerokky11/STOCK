@@ -5279,8 +5279,14 @@ function effectiveSourceModeStatus(status) {
 
 function heartbeatStatus(status) {
   const age = secondsSince(status.producer_heartbeat_at || status.updated_at);
+  const marketOpen = Boolean(status.market_open);
   if (!status.producer_heartbeat_at && !status.updated_at) {
     return { label: "producer 미시작", tone: "warn", note: "producer가 아직 시작되지 않았습니다." };
+  }
+  if (!marketOpen) {
+    if (age <= 30) return { label: "정상", tone: "ok", note: `장외 상태에서 최근 ${age}초 전에 heartbeat가 갱신됐습니다.` };
+    if (age <= 180) return { label: "대기", tone: "info", note: `장외 상태에서 최근 ${age}초 전에 heartbeat가 갱신됐습니다.` };
+    return { label: "지연", tone: "pending", note: `장외 상태에서 ${age}초 동안 heartbeat가 갱신되지 않았습니다.` };
   }
   if (age <= 15) return { label: "정상", tone: "ok", note: `최근 ${age}초 전에 heartbeat가 갱신됐습니다.` };
   if (age <= 45) return { label: "지연", tone: "pending", note: `최근 ${age}초 전에 heartbeat가 들어왔습니다.` };
